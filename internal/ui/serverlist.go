@@ -11,7 +11,7 @@ import (
 	"myproxy.com/p/internal/config"
 	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/logging"
-	"myproxy.com/p/internal/proxy"
+	"myproxy.com/p/internal/xray"
 )
 
 // ServerListPanel 管理服务器列表的显示和操作。
@@ -262,8 +262,13 @@ func (slp *ServerListPanel) onStartProxyFromSelected() {
 	}
 
 	// 如果已有代理在运行，先停止
+	if slp.appState.XrayInstance != nil {
+		slp.appState.XrayInstance.Stop()
+		slp.appState.XrayInstance = nil
+	}
 	if slp.appState.ProxyForwarder != nil && slp.appState.ProxyForwarder.IsRunning {
 		slp.appState.ProxyForwarder.Stop()
+		slp.appState.ProxyForwarder = nil
 	}
 
 	// 把当前的设置为选中
@@ -286,8 +291,13 @@ func (slp *ServerListPanel) onStartProxy(id widget.ListItemID) {
 	slp.appState.SelectedServerID = srv.ID
 
 	// 如果已有代理在运行，先停止
+	if slp.appState.XrayInstance != nil {
+		slp.appState.XrayInstance.Stop()
+		slp.appState.XrayInstance = nil
+	}
 	if slp.appState.ProxyForwarder != nil && slp.appState.ProxyForwarder.IsRunning {
 		slp.appState.ProxyForwarder.Stop()
+		slp.appState.ProxyForwarder = nil
 	}
 
 	// 启动代理
@@ -296,50 +306,77 @@ func (slp *ServerListPanel) onStartProxy(id widget.ListItemID) {
 
 // startProxyWithServer 使用指定的服务器启动代理
 func (slp *ServerListPanel) startProxyWithServer(srv *config.Server) {
+	// 使用固定的10080端口监听本地SOCKS5
+	proxyPort := 10080
 
-	// 如果端口为0，自动分配一个可用端口
-	proxyPort := slp.appState.Config.AutoProxyPort
-	if proxyPort == 0 {
-		proxyPort = 1080 // 默认端口
-		slp.appState.Config.AutoProxyPort = proxyPort
-	}
-
-	// 创建并启动自动代理转发器
-	localAddr := fmt.Sprintf("127.0.0.1:%d", proxyPort)
-	forwarder := proxy.NewAutoProxyForwarder(localAddr, "tcp", slp.appState.ServerManager)
-
-	// 设置日志回调，将日志输出到日志区域
+	// 记录开始启动日志
 	if slp.appState != nil {
-		forwarder.SetLogCallback(func(level, logType, message string) {
-			slp.appState.AppendLog(level, logType, message)
-		})
+		slp.appState.AppendLog("INFO", "xray", fmt.Sprintf("开始启动xray-core代理: %s", srv.Name))
 	}
 
-	// 实际启动代理服务
-	err := forwarder.Start()
+	// 使用统一的日志文件路径（与应用日志使用同一个文件）
+	unifiedLogPath := slp.appState.Logger.GetLogFilePath()
+	
+	// 创建xray配置，设置日志文件路径为统一日志文件
+	xrayConfigJSON, err := xray.CreateXrayConfig(proxyPort, srv, unifiedLogPath)
 	if err != nil {
-		// 启动失败，记录日志并显示错误（统一错误处理）
-		slp.logAndShowError("启动代理失败", err)
+		slp.logAndShowError("创建xray配置失败", err)
 		slp.appState.Config.AutoProxyEnabled = false
-		slp.appState.ProxyForwarder = nil
+		slp.appState.XrayInstance = nil
 		slp.appState.UpdateProxyStatus()
-		// 保存配置到数据库
 		slp.saveConfigToDB()
 		return
 	}
 
-	// 启动成功
-	slp.appState.ProxyForwarder = forwarder
+	// 记录配置创建成功日志
+	if slp.appState != nil {
+		slp.appState.AppendLog("DEBUG", "xray", fmt.Sprintf("xray配置已创建: %s", srv.Name))
+	}
+
+	// 创建日志回调函数，将 xray 日志转发到应用日志系统
+	logCallback := func(level, message string) {
+		if slp.appState != nil {
+			slp.appState.AppendLog(level, "xray", message)
+		}
+	}
+
+	// 创建xray实例，并设置日志回调
+	xrayInstance, err := xray.NewXrayInstanceFromJSONWithCallback(xrayConfigJSON, logCallback)
+	if err != nil {
+		slp.logAndShowError("创建xray实例失败", err)
+		slp.appState.Config.AutoProxyEnabled = false
+		slp.appState.XrayInstance = nil
+		slp.appState.UpdateProxyStatus()
+		slp.saveConfigToDB()
+		return
+	}
+
+	// 启动xray实例
+	err = xrayInstance.Start()
+	if err != nil {
+		slp.logAndShowError("启动xray实例失败", err)
+		slp.appState.Config.AutoProxyEnabled = false
+		slp.appState.XrayInstance = nil
+		slp.appState.UpdateProxyStatus()
+		slp.saveConfigToDB()
+		return
+	}
+
+	// 启动成功，设置端口信息
+	xrayInstance.SetPort(proxyPort)
+	slp.appState.XrayInstance = xrayInstance
 	slp.appState.Config.AutoProxyEnabled = true
+	slp.appState.Config.AutoProxyPort = proxyPort
 
 	// 记录日志（统一日志记录）
 	if slp.appState.Logger != nil {
-		slp.appState.Logger.InfoWithType(logging.LogTypeProxy, "代理已启动: %s (端口: %d)", srv.Name, proxyPort)
+		slp.appState.Logger.InfoWithType(logging.LogTypeProxy, "xray-core代理已启动: %s (端口: %d)", srv.Name, proxyPort)
 	}
 
 	// 追加日志到日志面板
 	if slp.appState != nil {
-		slp.appState.AppendLog("INFO", "proxy", fmt.Sprintf("代理已启动: %s (端口: %d)", srv.Name, proxyPort))
+		slp.appState.AppendLog("INFO", "xray", fmt.Sprintf("xray-core代理已启动: %s (端口: %d)", srv.Name, proxyPort))
+		slp.appState.AppendLog("INFO", "xray", fmt.Sprintf("服务器信息: %s:%d, 协议: %s", srv.Addr, srv.Port, srv.ProtocolType))
 	}
 
 	slp.Refresh()
@@ -378,28 +415,62 @@ func (slp *ServerListPanel) saveConfigToDB() {
 
 // onStopProxy 停止代理
 func (slp *ServerListPanel) onStopProxy() {
-	// 如果代理正在运行，停止它
-	if slp.appState.ProxyForwarder != nil && slp.appState.ProxyForwarder.IsRunning {
-		err := slp.appState.ProxyForwarder.Stop()
+	stopped := false
+
+	// 停止xray实例
+	if slp.appState.XrayInstance != nil {
+		if slp.appState != nil {
+			slp.appState.AppendLog("INFO", "xray", "正在停止xray-core代理...")
+		}
+
+		err := slp.appState.XrayInstance.Stop()
 		if err != nil {
 			// 停止失败，记录日志并显示错误（统一错误处理）
-			slp.logAndShowError("停止代理失败", err)
+			slp.logAndShowError("停止xray代理失败", err)
 			return
 		}
 
-		// 停止成功
-		slp.appState.Config.AutoProxyEnabled = false
-		slp.appState.Config.AutoProxyPort = 0
+		slp.appState.XrayInstance = nil
+		stopped = true
 
 		// 记录日志（统一日志记录）
 		if slp.appState.Logger != nil {
-			slp.appState.Logger.InfoWithType(logging.LogTypeProxy, "代理已停止")
+			slp.appState.Logger.InfoWithType(logging.LogTypeProxy, "xray-core代理已停止")
 		}
 
 		// 追加日志到日志面板
 		if slp.appState != nil {
-			slp.appState.AppendLog("INFO", "proxy", "代理已停止")
+			slp.appState.AppendLog("INFO", "xray", "xray-core代理已停止")
 		}
+	}
+
+	// 如果还有旧的转发器在运行，也停止它（兼容旧代码）
+	if slp.appState.ProxyForwarder != nil && slp.appState.ProxyForwarder.IsRunning {
+		err := slp.appState.ProxyForwarder.Stop()
+		if err != nil {
+			// 停止失败，记录日志并显示错误（统一错误处理）
+			slp.logAndShowError("停止代理转发器失败", err)
+			return
+		}
+
+		slp.appState.ProxyForwarder = nil
+		stopped = true
+
+		// 记录日志（统一日志记录）
+		if slp.appState.Logger != nil {
+			slp.appState.Logger.InfoWithType(logging.LogTypeProxy, "代理转发器已停止")
+		}
+
+		// 追加日志到日志面板
+		if slp.appState != nil {
+			slp.appState.AppendLog("INFO", "proxy", "代理转发器已停止")
+		}
+	}
+
+	if stopped {
+		// 停止成功
+		slp.appState.Config.AutoProxyEnabled = false
+		slp.appState.Config.AutoProxyPort = 0
 
 		// 更新状态绑定
 		slp.appState.UpdateProxyStatus()

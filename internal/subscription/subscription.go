@@ -159,6 +159,7 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 	if err == nil {
 		content = string(decoded)
 	}
+	fmt.Println(content)
 
 	// 尝试不同的订阅格式
 
@@ -175,16 +176,19 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 		// JSON格式解析成功
 		servers := make([]config.Server, len(jsonServers))
 		for i, js := range jsonServers {
+			rawConfig, _ := json.Marshal(js)
 			servers[i] = config.Server{
-				ID:       server.GenerateServerID(js.Addr, js.Port, js.Username),
-				Name:     js.Name,
-				Addr:     js.Addr,
-				Port:     js.Port,
-				Username: js.Username,
-				Password: js.Password,
-				Delay:    0,
-				Selected: false,
-				Enabled:  true,
+				ID:           server.GenerateServerID(js.Addr, js.Port, js.Username),
+				Name:         js.Name,
+				Addr:         js.Addr,
+				Port:         js.Port,
+				Username:     js.Username,
+				Password:     js.Password,
+				Delay:        0,
+				Selected:     false,
+				Enabled:      true,
+				ProtocolType: "socks5", // JSON格式默认为 SOCKS5
+				RawConfig:    string(rawConfig),
 			}
 		}
 		return servers, nil
@@ -220,41 +224,77 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 				}
 			}
 
-			// 解析JSON
+			// 解析JSON - 包含所有字段
 			var vmessConfig struct {
-				Add  string `json:"add"`
-				Port string `json:"port"` // port是字符串类型
-				Id   string `json:"id"`
-				Net  string `json:"net"`
-				Type string `json:"type"`
-				Host string `json:"host"`
-				Path string `json:"path"`
-				Tls  string `json:"tls"`
-				Ps   string `json:"ps"`
+				V    string `json:"v"`    // 版本
+				Ps   string `json:"ps"`   // 备注/名称
+				Add  string `json:"add"`  // 地址
+				Port string `json:"port"` // 端口（字符串类型）
+				Id   string `json:"id"`   // UUID
+				Aid  string `json:"aid"`  // AlterID（字符串类型，可能是 "0"）
+				Net  string `json:"net"`  // 传输协议: tcp, kcp, ws, h2, quic, grpc
+				Type string `json:"type"` // 伪装类型: none, http, srtp, utp, wechat-video
+				Host string `json:"host"` // 伪装域名
+				Path string `json:"path"` // 路径
+				Tls  string `json:"tls"`  // TLS: "" 或 "tls"
 			}
 
+			decodedStr := string(decoded)
+
 			if err := json.Unmarshal(decoded, &vmessConfig); err != nil {
+				fmt.Printf("解析 VMess JSON 失败: %v, 内容: %s\n", err, decodedStr)
 				continue
 			}
 
 			// 将port转换为整数
 			port, err := strconv.Atoi(vmessConfig.Port)
 			if err != nil {
+				fmt.Printf("解析端口失败: %v, 端口值: %s\n", err, vmessConfig.Port)
 				continue
 			}
 
-			// 创建服务器配置
-			s := config.Server{
-				ID:       server.GenerateServerID(vmessConfig.Add, port, vmessConfig.Id),
-				Name:     vmessConfig.Ps,
-				Addr:     vmessConfig.Add,
-				Port:     port,
-				Username: vmessConfig.Id,
-				Password: "",
-				Delay:    0,
-				Selected: false,
-				Enabled:  true,
+			// 将aid转换为整数
+			aid := 0
+			if vmessConfig.Aid != "" {
+				if aidInt, err := strconv.Atoi(vmessConfig.Aid); err == nil {
+					aid = aidInt
+				}
 			}
+
+			// 生成服务器ID（使用 addr:port:uuid）
+			serverID := server.GenerateServerID(vmessConfig.Add, port, vmessConfig.Id)
+
+			// 创建服务器配置，包含所有字段
+			s := config.Server{
+				ID:           serverID,
+				Name:         vmessConfig.Ps,
+				Addr:         vmessConfig.Add,
+				Port:         port,
+				Username:     vmessConfig.Id, // VMess 使用 UUID 作为标识
+				Password:     "",
+				Delay:        0,
+				Selected:     false,
+				Enabled:      true,
+				ProtocolType: "vmess",
+				// VMess 协议字段
+				VMessVersion:  vmessConfig.V,
+				VMessUUID:     vmessConfig.Id,
+				VMessAlterID:  aid,
+				VMessSecurity: "auto", // 默认加密方式
+				VMessNetwork:  vmessConfig.Net,
+				VMessType:     vmessConfig.Type,
+				VMessHost:     vmessConfig.Host,
+				VMessPath:     vmessConfig.Path,
+				VMessTLS:      vmessConfig.Tls,
+				// 保存原始配置 JSON
+				RawConfig: decodedStr,
+			}
+
+			// 如果名称为空，使用地址:端口作为名称
+			if s.Name == "" {
+				s.Name = fmt.Sprintf("%s:%d", s.Addr, s.Port)
+			}
+
 			servers = append(servers, s)
 			continue
 		}
@@ -272,15 +312,17 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 		if matches != nil {
 			port, _ := strconv.Atoi(matches[4])
 			s := config.Server{
-				ID:       server.GenerateServerID(matches[3], port, matches[1]),
-				Name:     fmt.Sprintf("%s:%d", matches[3], port),
-				Addr:     matches[3],
-				Port:     port,
-				Username: matches[1],
-				Password: matches[2],
-				Delay:    0,
-				Selected: false,
-				Enabled:  true,
+				ID:           server.GenerateServerID(matches[3], port, matches[1]),
+				Name:         fmt.Sprintf("%s:%d", matches[3], port),
+				Addr:         matches[3],
+				Port:         port,
+				Username:     matches[1],
+				Password:     matches[2],
+				Delay:        0,
+				Selected:     false,
+				Enabled:      true,
+				ProtocolType: "socks5",
+				RawConfig:    line,
 			}
 			servers = append(servers, s)
 			continue
@@ -292,15 +334,17 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 		if matches != nil {
 			port, _ := strconv.Atoi(matches[2])
 			s := config.Server{
-				ID:       server.GenerateServerID(matches[1], port, matches[3]),
-				Name:     fmt.Sprintf("%s:%d", matches[1], port),
-				Addr:     matches[1],
-				Port:     port,
-				Username: matches[3],
-				Password: matches[4],
-				Delay:    0,
-				Selected: false,
-				Enabled:  true,
+				ID:           server.GenerateServerID(matches[1], port, matches[3]),
+				Name:         fmt.Sprintf("%s:%d", matches[1], port),
+				Addr:         matches[1],
+				Port:         port,
+				Username:     matches[3],
+				Password:     matches[4],
+				Delay:        0,
+				Selected:     false,
+				Enabled:      true,
+				ProtocolType: "socks5", // 简单格式默认为 SOCKS5
+				RawConfig:    line,
 			}
 			servers = append(servers, s)
 		}

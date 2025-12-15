@@ -71,6 +71,24 @@ func createTables() error {
 		delay INTEGER NOT NULL DEFAULT 0,
 		selected INTEGER NOT NULL DEFAULT 0,
 		enabled INTEGER NOT NULL DEFAULT 1,
+		node_protocol_type TEXT NOT NULL DEFAULT 'socks5',
+		vmess_version TEXT DEFAULT '',
+		vmess_uuid TEXT DEFAULT '',
+		vmess_alter_id INTEGER DEFAULT 0,
+		vmess_security TEXT DEFAULT '',
+		vmess_network TEXT DEFAULT '',
+		vmess_type TEXT DEFAULT '',
+		vmess_host TEXT DEFAULT '',
+		vmess_path TEXT DEFAULT '',
+		vmess_tls TEXT DEFAULT '',
+		ss_method TEXT DEFAULT '',
+		ss_plugin TEXT DEFAULT '',
+		ss_plugin_opts TEXT DEFAULT '',
+		ssr_obfs TEXT DEFAULT '',
+		ssr_obfs_param TEXT DEFAULT '',
+		ssr_protocol TEXT DEFAULT '',
+		ssr_protocol_param TEXT DEFAULT '',
+		raw_config TEXT DEFAULT '',
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
@@ -123,6 +141,83 @@ func createTables() error {
 
 	if _, err := DB.Exec(createIndexes); err != nil {
 		return fmt.Errorf("创建索引失败: %w", err)
+	}
+
+	// 迁移已有数据库表结构（如果字段不存在则添加）
+	if err := migrateTables(); err != nil {
+		return fmt.Errorf("迁移数据库表失败: %w", err)
+	}
+
+	return nil
+}
+
+// migrateTables 迁移数据库表，添加新字段（如果不存在）
+func migrateTables() error {
+	// 检查并添加新字段
+	migrations := []struct {
+		column string
+		colType string
+	}{
+		{"node_protocol_type", "TEXT DEFAULT 'socks5'"},
+		{"vmess_version", "TEXT DEFAULT ''"},
+		{"vmess_uuid", "TEXT DEFAULT ''"},
+		{"vmess_alter_id", "INTEGER DEFAULT 0"},
+		{"vmess_security", "TEXT DEFAULT ''"},
+		{"vmess_network", "TEXT DEFAULT ''"},
+		{"vmess_type", "TEXT DEFAULT ''"},
+		{"vmess_host", "TEXT DEFAULT ''"},
+		{"vmess_path", "TEXT DEFAULT ''"},
+		{"vmess_tls", "TEXT DEFAULT ''"},
+		{"ss_method", "TEXT DEFAULT ''"},
+		{"ss_plugin", "TEXT DEFAULT ''"},
+		{"ss_plugin_opts", "TEXT DEFAULT ''"},
+		{"ssr_obfs", "TEXT DEFAULT ''"},
+		{"ssr_obfs_param", "TEXT DEFAULT ''"},
+		{"ssr_protocol", "TEXT DEFAULT ''"},
+		{"ssr_protocol_param", "TEXT DEFAULT ''"},
+		{"raw_config", "TEXT DEFAULT ''"},
+	}
+
+	// 获取表结构信息
+	rows, err := DB.Query("PRAGMA table_info(servers)")
+	if err != nil {
+		// 表可能不存在，返回 nil（表会在 createTables 中创建）
+		return nil
+	}
+	defer rows.Close()
+
+	existingColumns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notnull int
+		var dfltValue sql.NullString
+		var pk int
+
+		if err := rows.Scan(&cid, &name, &colType, &notnull, &dfltValue, &pk); err != nil {
+			continue
+		}
+		existingColumns[name] = true
+	}
+
+	// 添加缺失的字段
+	for _, m := range migrations {
+		if !existingColumns[m.column] {
+			// 字段不存在，添加字段
+			_, err := DB.Exec(fmt.Sprintf(
+				"ALTER TABLE servers ADD COLUMN %s %s",
+				m.column, m.colType,
+			))
+			if err != nil {
+				// 如果添加失败，记录错误但继续
+				continue
+			}
+
+			// 如果是 node_protocol_type，为已有数据设置默认值
+			if m.column == "node_protocol_type" {
+				_, _ = DB.Exec("UPDATE servers SET node_protocol_type = 'socks5' WHERE node_protocol_type IS NULL OR node_protocol_type = ''")
+			}
+		}
 	}
 
 	return nil
@@ -282,12 +377,19 @@ func AddOrUpdateServer(server config.Server, subscriptionID *int64) error {
 	if err == sql.ErrNoRows {
 		// 不存在，插入新记录
 		_, err = DB.Exec(
-			`INSERT INTO servers (id, subscription_id, name, addr, port, username, password, delay, selected, enabled, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO servers (id, subscription_id, name, addr, port, username, password, delay, selected, enabled,
+				node_protocol_type, vmess_version, vmess_uuid, vmess_alter_id, vmess_security, vmess_network,
+				vmess_type, vmess_host, vmess_path, vmess_tls, ss_method, ss_plugin, ss_plugin_opts,
+				ssr_obfs, ssr_obfs_param, ssr_protocol, ssr_protocol_param, raw_config, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			server.ID, subscriptionID, server.Name, server.Addr, server.Port,
 			server.Username, server.Password, server.Delay,
 			boolToInt(server.Selected), boolToInt(server.Enabled),
-			now, now,
+			server.ProtocolType, server.VMessVersion, server.VMessUUID, server.VMessAlterID,
+			server.VMessSecurity, server.VMessNetwork, server.VMessType, server.VMessHost,
+			server.VMessPath, server.VMessTLS, server.SSMethod, server.SSPlugin, server.SSPluginOpts,
+			server.SSRObfs, server.SSRObfsParam, server.SSRProtocol, server.SSRProtocolParam,
+			server.RawConfig, now, now,
 		)
 		if err != nil {
 			return fmt.Errorf("插入服务器失败: %w", err)
@@ -305,12 +407,21 @@ func AddOrUpdateServer(server config.Server, subscriptionID *int64) error {
 		_, err = DB.Exec(
 			`UPDATE servers SET 
 				subscription_id = ?, name = ?, addr = ?, port = ?, username = ?, password = ?,
-				delay = ?, selected = ?, enabled = ?, updated_at = ?
+				delay = ?, selected = ?, enabled = ?,
+				node_protocol_type = ?, vmess_version = ?, vmess_uuid = ?, vmess_alter_id = ?, vmess_security = ?,
+				vmess_network = ?, vmess_type = ?, vmess_host = ?, vmess_path = ?, vmess_tls = ?,
+				ss_method = ?, ss_plugin = ?, ss_plugin_opts = ?,
+				ssr_obfs = ?, ssr_obfs_param = ?, ssr_protocol = ?, ssr_protocol_param = ?,
+				raw_config = ?, updated_at = ?
 			 WHERE id = ?`,
 			updateSubscriptionID, server.Name, server.Addr, server.Port,
 			server.Username, server.Password, server.Delay,
 			boolToInt(server.Selected), boolToInt(server.Enabled),
-			now, server.ID,
+			server.ProtocolType, server.VMessVersion, server.VMessUUID, server.VMessAlterID,
+			server.VMessSecurity, server.VMessNetwork, server.VMessType, server.VMessHost,
+			server.VMessPath, server.VMessTLS, server.SSMethod, server.SSPlugin, server.SSPluginOpts,
+			server.SSRObfs, server.SSRObfsParam, server.SSRProtocol, server.SSRProtocolParam,
+			server.RawConfig, now, server.ID,
 		)
 		if err != nil {
 			return fmt.Errorf("更新服务器失败: %w", err)
@@ -353,12 +464,20 @@ func GetServer(id string) (*config.Server, error) {
 	var selected, enabled int
 
 	err := DB.QueryRow(
-		`SELECT id, name, addr, port, username, password, delay, selected, enabled
+		`SELECT id, name, addr, port, username, password, delay, selected, enabled,
+			node_protocol_type, vmess_version, vmess_uuid, vmess_alter_id, vmess_security, vmess_network,
+			vmess_type, vmess_host, vmess_path, vmess_tls, ss_method, ss_plugin, ss_plugin_opts,
+			ssr_obfs, ssr_obfs_param, ssr_protocol, ssr_protocol_param, raw_config
 		 FROM servers WHERE id = ?`,
 		id,
 	).Scan(&server.ID, &server.Name, &server.Addr, &server.Port,
 		&server.Username, &server.Password, &server.Delay,
-		&selected, &enabled)
+		&selected, &enabled,
+		&server.ProtocolType, &server.VMessVersion, &server.VMessUUID, &server.VMessAlterID,
+		&server.VMessSecurity, &server.VMessNetwork, &server.VMessType, &server.VMessHost,
+		&server.VMessPath, &server.VMessTLS, &server.SSMethod, &server.SSPlugin, &server.SSPluginOpts,
+		&server.SSRObfs, &server.SSRObfsParam, &server.SSRProtocol, &server.SSRProtocolParam,
+		&server.RawConfig)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("服务器不存在: %s", id)
@@ -369,6 +488,11 @@ func GetServer(id string) (*config.Server, error) {
 
 	server.Selected = intToBool(selected)
 	server.Enabled = intToBool(enabled)
+	
+	// 如果 ProtocolType 为空，设置默认值
+	if server.ProtocolType == "" {
+		server.ProtocolType = "socks5"
+	}
 
 	return &server, nil
 }
@@ -377,7 +501,10 @@ func GetServer(id string) (*config.Server, error) {
 // 返回：服务器列表和错误（如果有）
 func GetAllServers() ([]config.Server, error) {
 	rows, err := DB.Query(
-		`SELECT id, name, addr, port, username, password, delay, selected, enabled
+		`SELECT id, name, addr, port, username, password, delay, selected, enabled,
+			node_protocol_type, vmess_version, vmess_uuid, vmess_alter_id, vmess_security, vmess_network,
+			vmess_type, vmess_host, vmess_path, vmess_tls, ss_method, ss_plugin, ss_plugin_opts,
+			ssr_obfs, ssr_obfs_param, ssr_protocol, ssr_protocol_param, raw_config
 		 FROM servers ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -392,12 +519,23 @@ func GetAllServers() ([]config.Server, error) {
 
 		if err := rows.Scan(&server.ID, &server.Name, &server.Addr, &server.Port,
 			&server.Username, &server.Password, &server.Delay,
-			&selected, &enabled); err != nil {
+			&selected, &enabled,
+			&server.ProtocolType, &server.VMessVersion, &server.VMessUUID, &server.VMessAlterID,
+			&server.VMessSecurity, &server.VMessNetwork, &server.VMessType, &server.VMessHost,
+			&server.VMessPath, &server.VMessTLS, &server.SSMethod, &server.SSPlugin, &server.SSPluginOpts,
+			&server.SSRObfs, &server.SSRObfsParam, &server.SSRProtocol, &server.SSRProtocolParam,
+			&server.RawConfig); err != nil {
 			return nil, fmt.Errorf("扫描服务器数据失败: %w", err)
 		}
 
 		server.Selected = intToBool(selected)
 		server.Enabled = intToBool(enabled)
+		
+		// 如果 ProtocolType 为空，设置默认值
+		if server.ProtocolType == "" {
+			server.ProtocolType = "socks5"
+		}
+		
 		servers = append(servers, server)
 	}
 
@@ -415,7 +553,10 @@ func GetAllServers() ([]config.Server, error) {
 // 返回：服务器列表和错误（如果有）
 func GetServersBySubscriptionID(subscriptionID int64) ([]config.Server, error) {
 	rows, err := DB.Query(
-		`SELECT id, name, addr, port, username, password, delay, selected, enabled
+		`SELECT id, name, addr, port, username, password, delay, selected, enabled,
+			node_protocol_type, vmess_version, vmess_uuid, vmess_alter_id, vmess_security, vmess_network,
+			vmess_type, vmess_host, vmess_path, vmess_tls, ss_method, ss_plugin, ss_plugin_opts,
+			ssr_obfs, ssr_obfs_param, ssr_protocol, ssr_protocol_param, raw_config
 		 FROM servers WHERE subscription_id = ? ORDER BY created_at DESC`,
 		subscriptionID,
 	)
@@ -431,12 +572,23 @@ func GetServersBySubscriptionID(subscriptionID int64) ([]config.Server, error) {
 
 		if err := rows.Scan(&server.ID, &server.Name, &server.Addr, &server.Port,
 			&server.Username, &server.Password, &server.Delay,
-			&selected, &enabled); err != nil {
+			&selected, &enabled,
+			&server.ProtocolType, &server.VMessVersion, &server.VMessUUID, &server.VMessAlterID,
+			&server.VMessSecurity, &server.VMessNetwork, &server.VMessType, &server.VMessHost,
+			&server.VMessPath, &server.VMessTLS, &server.SSMethod, &server.SSPlugin, &server.SSPluginOpts,
+			&server.SSRObfs, &server.SSRObfsParam, &server.SSRProtocol, &server.SSRProtocolParam,
+			&server.RawConfig); err != nil {
 			return nil, fmt.Errorf("扫描服务器数据失败: %w", err)
 		}
 
 		server.Selected = intToBool(selected)
 		server.Enabled = intToBool(enabled)
+		
+		// 如果 ProtocolType 为空，设置默认值
+		if server.ProtocolType == "" {
+			server.ProtocolType = "socks5"
+		}
+		
 		servers = append(servers, server)
 	}
 

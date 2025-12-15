@@ -1,11 +1,15 @@
 package ui
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
@@ -32,6 +36,10 @@ type LogsPanel struct {
 	logBuffer     []LogEntry // 日志缓冲区
 	bufferMutex   sync.Mutex // 保护日志缓冲区的互斥锁
 	maxBufferSize int        // 最大缓冲区大小
+	fileWatcher   *fsnotify.Watcher // 文件监控器
+	ctx           context.Context    // 上下文，用于控制监控 goroutine
+	cancel        context.CancelFunc // 取消函数
+	lastReadPos   int64              // 最后读取的位置
 }
 
 // NewLogsPanel 创建并初始化日志显示面板。
@@ -63,9 +71,9 @@ func NewLogsPanel(appState *AppState) *LogsPanel {
 		},
 	)
 
-	// 日志类型选择
+	// 日志类型选择（添加 xray 类型）
 	lp.typeSel = widget.NewSelect(
-		[]string{"全部", "app", "proxy"},
+		[]string{"全部", "app", "proxy", "xray"},
 		func(value string) {
 			if lp.levelSel != nil { // 确保 levelSel 已初始化
 				lp.refreshDisplay()
@@ -77,8 +85,13 @@ func NewLogsPanel(appState *AppState) *LogsPanel {
 	lp.levelSel.SetSelected("全部")
 	lp.typeSel.SetSelected("全部")
 
+	// 创建上下文用于控制监控 goroutine
+	lp.ctx, lp.cancel = context.WithCancel(context.Background())
+
 	// 初始加载历史日志
 	lp.loadInitialLogs()
+
+	// 注意：文件监控将在Logger初始化后启动（在cmd/gui/main.go中）
 
 	return lp
 }
@@ -111,28 +124,39 @@ func (lp *LogsPanel) Build() fyne.CanvasObject {
 }
 
 // AppendLog 追加一条日志到日志面板（线程安全）
+// 注意：此方法主要用于兼容性，建议使用 AppendLogLine 确保格式一致
 // 该方法可以从任何地方调用，会自动追加到日志缓冲区并更新显示
 func (lp *LogsPanel) AppendLog(level, logType, message string) {
 	if lp == nil {
 		return
 	}
 
-	// 构建完整的日志行
+	// 构建完整的日志行（与Logger.log()中的格式保持一致）
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	logLine := fmt.Sprintf("%s [%s] [%s] %s", timestamp, level, logType, message)
 
-	// 创建日志条目
-	entry := LogEntry{
-		Timestamp: time.Now(),
-		Level:     level,
-		Type:      logType,
-		Message:   message,
-		Line:      logLine,
+	// 使用统一的AppendLogLine方法
+	lp.AppendLogLine(logLine)
+}
+
+// AppendLogLine 追加一条完整格式的日志行到日志面板（线程安全）
+// 此方法用于确保日志格式与文件中的格式一致
+// 参数：
+//   - logLine: 完整的日志行，格式为 "timestamp [LEVEL] [type] message"
+func (lp *LogsPanel) AppendLogLine(logLine string) {
+	if lp == nil {
+		return
+	}
+
+	// 解析日志行
+	entry := lp.parseLogLine(logLine)
+	if entry == nil {
+		return
 	}
 
 	// 线程安全地追加到缓冲区
 	lp.bufferMutex.Lock()
-	lp.logBuffer = append(lp.logBuffer, entry)
+	lp.logBuffer = append(lp.logBuffer, *entry)
 
 	// 如果超过最大大小，删除最旧的日志
 	if len(lp.logBuffer) > lp.maxBufferSize {
@@ -150,9 +174,27 @@ func (lp *LogsPanel) loadInitialLogs() {
 		return
 	}
 
-	logLines, err := lp.appState.Logger.GetLogs(100)
-	if err != nil {
+	logFilePath := lp.appState.Logger.GetLogFilePath()
+	if logFilePath == "" {
 		return
+	}
+
+	// 尝试直接读取日志文件（如果存在）
+	file, err := os.Open(logFilePath)
+	if err != nil {
+		// 文件不存在，跳过
+		return
+	}
+	defer file.Close()
+
+	// 读取所有内容
+	scanner := bufio.NewScanner(file)
+	logLines := make([]string, 0)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			logLines = append(logLines, line)
+		}
 	}
 
 	// 解析日志行并添加到缓冲区
@@ -164,6 +206,12 @@ func (lp *LogsPanel) loadInitialLogs() {
 			lp.logBuffer = append(lp.logBuffer, *entry)
 		}
 	}
+	
+	// 更新 lastReadPos 为文件末尾（避免重复读取）
+	if fileInfo, err := os.Stat(logFilePath); err == nil {
+		lp.lastReadPos = fileInfo.Size()
+	}
+	
 	lp.bufferMutex.Unlock()
 
 	// 刷新显示
@@ -171,11 +219,11 @@ func (lp *LogsPanel) loadInitialLogs() {
 }
 
 // parseLogLine 解析日志行，提取级别、类型和消息
+// 支持两种格式：
+// 1. 应用日志格式: timestamp [LEVEL] [type] message
+// 2. xray 日志格式: timestamp [Level] tag: message 或 timestamp [Level] tag/subtag: message
 func (lp *LogsPanel) parseLogLine(line string) *LogEntry {
-	// 日志格式: timestamp [LEVEL] [type] message
-	// 例如: 2025-01-01 12:00:00 [INFO] [app] 这是一条消息
-
-	// 查找第一个 [ 和 ]
+	// 尝试解析应用日志格式: timestamp [LEVEL] [type] message
 	levelStart := strings.Index(line, "[")
 	if levelStart == -1 {
 		return nil
@@ -190,26 +238,71 @@ func (lp *LogsPanel) parseLogLine(line string) *LogEntry {
 	timestampStr := strings.TrimSpace(line[:levelStart])
 	level := line[levelStart+1 : levelEnd]
 
-	// 查找第二个 [ 和 ]
+	// 查找第二个 [ 和 ]（应用日志格式）
 	typeStart := strings.Index(line[levelEnd+1:], "[")
-	if typeStart == -1 {
-		return nil
-	}
-	typeStart += levelEnd + 1
-	typeEnd := strings.Index(line[typeStart:], "]")
-	if typeEnd == -1 {
-		return nil
-	}
-	typeEnd += typeStart
+	var logType string
+	var message string
+	var timestamp time.Time
 
-	// 提取类型和消息
-	logType := line[typeStart+1 : typeEnd]
-	message := strings.TrimSpace(line[typeEnd+1:])
+	if typeStart != -1 && typeStart < 50 { // 第二个 [ 应该很快出现（应用日志格式）
+		typeStart += levelEnd + 1
+		typeEnd := strings.Index(line[typeStart:], "]")
+		if typeEnd != -1 {
+			typeEnd += typeStart
+			// 应用日志格式
+			logType = line[typeStart+1 : typeEnd]
+			message = strings.TrimSpace(line[typeEnd+1:])
+			var err error
+			timestamp, err = time.Parse("2006-01-02 15:04:05", timestampStr)
+			if err != nil {
+				timestamp = time.Now()
+			}
+		} else {
+			return nil
+		}
+	} else {
+		// xray 日志格式: timestamp [Level] tag/subtag: message
+		// 例如: 2025/12/15 16:53:13.879127 [Debug] app/log: Logger started
+		rest := strings.TrimSpace(line[levelEnd+1:])
+		colonIndex := strings.Index(rest, ":")
+		if colonIndex > 0 {
+			tag := strings.TrimSpace(rest[:colonIndex])
+			message = strings.TrimSpace(rest[colonIndex+1:])
+			
+			// 从 tag 中提取类型（例如 "app/log" -> "xray"）
+			logType = "xray"
+			if strings.HasPrefix(tag, "app/") || strings.HasPrefix(tag, "proxy/") {
+				logType = "xray"
+			}
+			
+			// 解析 xray 时间戳格式: 2025/12/15 16:53:13.879127
+			var err error
+			timestamp, err = time.Parse("2006/01/02 15:04:05.000000", timestampStr)
+			if err != nil {
+				// 尝试不带微秒的格式
+				timestamp, err = time.Parse("2006/01/02 15:04:05", timestampStr)
+				if err != nil {
+					timestamp = time.Now()
+				}
+			}
+		} else {
+			// 没有冒号，整个 rest 作为消息
+			message = rest
+			logType = "xray"
+			timestamp = time.Now()
+		}
+	}
 
-	// 解析时间戳
-	timestamp, err := time.Parse("2006-01-02 15:04:05", timestampStr)
-	if err != nil {
-		timestamp = time.Now()
+	// 标准化级别名称
+	level = strings.ToUpper(level)
+	if level == "DEBUG" || level == "Debug" {
+		level = "DEBUG"
+	} else if level == "INFO" || level == "Info" {
+		level = "INFO"
+	} else if level == "WARN" || level == "Warning" {
+		level = "WARN"
+	} else if level == "ERROR" || level == "Error" {
+		level = "ERROR"
 	}
 
 	return &LogEntry{
@@ -293,4 +386,147 @@ func (lp *LogsPanel) containsLogType(logLine, logType string) bool {
 // Refresh 刷新日志显示，重新应用当前过滤条件。
 func (lp *LogsPanel) Refresh() {
 	lp.refreshDisplay()
+}
+
+// StartLogFileWatcher 启动日志文件监控（公开方法，可在Logger初始化后调用）
+func (lp *LogsPanel) StartLogFileWatcher() {
+	if lp.appState == nil || lp.appState.Logger == nil {
+		return
+	}
+
+	logFilePath := lp.appState.Logger.GetLogFilePath()
+	if logFilePath == "" {
+		return
+	}
+
+	// 如果监控器已存在，先关闭
+	if lp.fileWatcher != nil {
+		lp.fileWatcher.Close()
+	}
+
+	// 创建文件监控器
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	lp.fileWatcher = watcher
+
+	// 监控日志文件所在目录
+	logDir := logFilePath
+	if lastSlash := strings.LastIndex(logDir, "/"); lastSlash >= 0 {
+		logDir = logDir[:lastSlash]
+	}
+	if logDir == "" {
+		logDir = "."
+	}
+
+	// 添加目录到监控
+	if err := watcher.Add(logDir); err != nil {
+		watcher.Close()
+		lp.fileWatcher = nil
+		return
+	}
+
+	// 初始化 lastReadPos 为当前文件大小（避免重复读取已有内容）
+	if fileInfo, err := os.Stat(logFilePath); err == nil {
+		lp.lastReadPos = fileInfo.Size()
+	}
+
+	// 启动监控 goroutine
+	go lp.watchLogFile()
+}
+
+// startLogFileWatcher 内部方法，已废弃，使用 StartLogFileWatcher
+func (lp *LogsPanel) startLogFileWatcher() {
+	lp.StartLogFileWatcher()
+}
+
+// watchLogFile 监控日志文件变化
+func (lp *LogsPanel) watchLogFile() {
+	if lp.fileWatcher == nil {
+		return
+	}
+	defer lp.fileWatcher.Close()
+
+	logFilePath := lp.appState.Logger.GetLogFilePath()
+	ticker := time.NewTicker(500 * time.Millisecond) // 每 500ms 检查一次文件变化
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-lp.ctx.Done():
+			return
+		case <-ticker.C:
+			// 读取文件的新内容
+			lp.readNewLogLines(logFilePath)
+		case event, ok := <-lp.fileWatcher.Events:
+			if !ok {
+				return
+			}
+			// 检查是否是目标日志文件的变化
+			if event.Op&fsnotify.Write == fsnotify.Write && event.Name == logFilePath {
+				lp.readNewLogLines(logFilePath)
+			}
+		case err, ok := <-lp.fileWatcher.Errors:
+			if !ok {
+				return
+			}
+			// 忽略监控错误，继续运行
+			_ = err
+		}
+	}
+}
+
+// readNewLogLines 读取日志文件的新行
+// 注意：此方法主要用于读取直接从文件写入的日志（如xray日志）
+// 通过Logger写入的日志会通过回调直接更新UI，避免重复处理
+func (lp *LogsPanel) readNewLogLines(logFilePath string) {
+	file, err := os.Open(logFilePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	// 获取文件信息
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return
+	}
+
+	// 如果文件大小小于等于上次读取的位置，说明没有新内容
+	if fileInfo.Size() <= lp.lastReadPos {
+		// 如果文件被截断（比如归档），重置位置
+		if fileInfo.Size() < lp.lastReadPos {
+			lp.lastReadPos = 0
+		}
+		return
+	}
+
+	// 移动到上次读取的位置
+	if _, err := file.Seek(lp.lastReadPos, 0); err != nil {
+		return
+	}
+
+	// 读取新内容
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			// 使用统一的AppendLogLine方法，确保格式一致性
+			lp.AppendLogLine(line)
+		}
+	}
+
+	// 更新最后读取的位置
+	lp.lastReadPos, _ = file.Seek(0, 1)
+}
+
+// Stop 停止日志面板的监控
+func (lp *LogsPanel) Stop() {
+	if lp.cancel != nil {
+		lp.cancel()
+	}
+	if lp.fileWatcher != nil {
+		lp.fileWatcher.Close()
+	}
 }

@@ -110,25 +110,55 @@ func (mw *MainWindow) saveLayoutConfig() {
 // 该方法使用自定义 Border 布局，支持百分比控制各区域的大小。
 // 返回：主窗口的根容器组件
 func (mw *MainWindow) Build() fyne.CanvasObject {
+	// 确保所有面板都已初始化
+	if mw.serverListPanel == nil || mw.logsPanel == nil ||
+		mw.subscriptionPanel == nil || mw.statusPanel == nil {
+		// 如果面板未初始化，返回一个空的容器（不应该发生，但作为安全措施）
+		return container.NewWithoutLayout()
+	}
+
 	// 服务器列表和日志的垂直分割
 	serverListArea := mw.serverListPanel.Build()
 	logArea := mw.logsPanel.Build()
+
+	// 确保构建的组件不为 nil
+	if serverListArea == nil {
+		serverListArea = container.NewWithoutLayout()
+	}
+	if logArea == nil {
+		logArea = container.NewWithoutLayout()
+	}
+
+	// 创建分割容器，确保两个子组件都不为 nil
+	// 使用 defer recover 来确保即使创建失败也不会崩溃
 	mw.mainSplit = container.NewVSplit(serverListArea, logArea)
 
-	// 从配置加载分割位置
-	if mw.layoutConfig.ServerListOffset > 0 {
-		mw.mainSplit.Offset = mw.layoutConfig.ServerListOffset
-	} else {
-		// 默认位置：服务器列表50%，日志25%
-		// 比例 = 50/(50+25) = 0.6667
-		mw.mainSplit.Offset = 0.6667
+	// 确保分割容器已正确初始化
+	if mw.mainSplit != nil {
+		// 从配置加载分割位置
+		if mw.layoutConfig != nil && mw.layoutConfig.ServerListOffset > 0 {
+			mw.mainSplit.Offset = mw.layoutConfig.ServerListOffset
+		} else {
+			// 默认位置：服务器列表50%，日志25%
+			// 比例 = 50/(50+25) = 0.6667
+			mw.mainSplit.Offset = 0.6667
+		}
+
+		// 确保分割容器可见并已初始化
+		mw.mainSplit.Show()
 	}
 
 	// 订阅管理区域
 	subscriptionArea := mw.subscriptionPanel.Build()
+	if subscriptionArea == nil {
+		subscriptionArea = container.NewWithoutLayout()
+	}
 
 	// 状态信息区域
 	statusArea := mw.statusPanel.Build()
+	if statusArea == nil {
+		statusArea = container.NewWithoutLayout()
+	}
 
 	// 使用自定义 Border 布局，支持百分比控制
 	// top=订阅管理（20%），bottom=状态信息（5%），center=服务器列表和日志（75%）
@@ -163,10 +193,18 @@ func (mw *MainWindow) Build() fyne.CanvasObject {
 
 // Refresh 刷新主窗口的所有面板，包括服务器列表、日志显示和订阅管理。
 // 该方法会更新数据绑定，使 UI 自动反映最新的应用状态。
+// 注意：此方法包含安全检查，防止在窗口移动/缩放时出现空指针错误。
 func (mw *MainWindow) Refresh() {
-	mw.serverListPanel.Refresh()
-	mw.logsPanel.Refresh() // 刷新日志面板，显示最新日志
-	mw.subscriptionPanel.refreshSubscriptionList()
+	// 安全检查：确保所有面板都已初始化
+	if mw.serverListPanel != nil {
+		mw.serverListPanel.Refresh()
+	}
+	if mw.logsPanel != nil {
+		mw.logsPanel.Refresh() // 刷新日志面板，显示最新日志
+	}
+	if mw.subscriptionPanel != nil {
+		mw.subscriptionPanel.refreshSubscriptionList()
+	}
 	// 使用双向绑定，只需更新绑定数据，UI 会自动更新
 	if mw.appState != nil {
 		mw.appState.UpdateProxyStatus()

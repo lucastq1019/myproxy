@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"myproxy.com/p/internal/config"
 	"myproxy.com/p/internal/database"
@@ -33,36 +32,52 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	// 初始化日志（使用数据库中的配置）
-	logger, err := logging.NewLogger(cfg.LogFile, cfg.LogLevel == "debug", cfg.LogLevel)
-	if err != nil {
-		log.Fatalf("初始化日志失败: %v", err)
-	}
-
-	// 创建应用状态
-	appState := ui.NewAppState(cfg, logger)
+	// 创建应用状态（先创建，logger稍后设置）
+	appState := ui.NewAppState(cfg, nil)
 
 	// 启动时从数据库同步服务器列表，保证 UI 有数据
 	appState.LoadServersFromDB()
 
-	// 初始化应用
+	// 初始化应用（创建Fyne应用和窗口）
 	appState.InitApp()
 
-	// 创建主窗口
+	// 创建主窗口（此时LogsPanel已创建）
 	mainWindow := ui.NewMainWindow(appState)
+	
+	// 创建日志回调函数，用于实时更新UI（确保日志文件写入和UI显示一致）
+	logCallback := func(level, logType, message, logLine string) {
+		if appState.LogsPanel != nil {
+			// 直接使用完整的日志行，确保格式与文件中的格式完全一致
+			appState.LogsPanel.AppendLogLine(logLine)
+		}
+	}
+
+	// 初始化日志（使用数据库中的配置），并设置UI回调
+	logger, err := logging.NewLogger(cfg.LogFile, cfg.LogLevel == "debug", cfg.LogLevel, logCallback)
+	if err != nil {
+		log.Fatalf("初始化日志失败: %v", err)
+	}
+	
+	// 设置logger到appState
+	appState.Logger = logger
+	
+	// Logger初始化后，启动日志文件监控（用于监控xray日志等直接从文件写入的日志）
+	if appState.LogsPanel != nil {
+		appState.LogsPanel.StartLogFileWatcher()
+	}
 
 	// 设置窗口内容
-	appState.Window.SetContent(mainWindow.Build())
-
-	// 延迟刷新，确保所有组件都已初始化
-	go func() {
-		// 等待窗口完全显示
-		time.Sleep(100 * time.Millisecond)
-		mainWindow.Refresh()
-	}()
+	content := mainWindow.Build()
+	if content != nil {
+		appState.Window.SetContent(content)
+	}
 
 	// 设置窗口关闭事件，保存配置
 	appState.Window.SetCloseIntercept(func() {
+		// 停止日志监控
+		if appState.LogsPanel != nil {
+			appState.LogsPanel.Stop()
+		}
 		// 保存布局配置到数据库
 		mainWindow.SaveLayoutConfig()
 		// 保存应用配置到数据库

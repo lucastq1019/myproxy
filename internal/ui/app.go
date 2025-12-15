@@ -14,6 +14,7 @@ import (
 	"myproxy.com/p/internal/proxy"
 	"myproxy.com/p/internal/server"
 	"myproxy.com/p/internal/subscription"
+	"myproxy.com/p/internal/xray"
 )
 
 // AppState 管理应用的整体状态，包括配置、管理器、日志和 UI 组件。
@@ -28,8 +29,11 @@ type AppState struct {
 	Window              fyne.Window
 	SelectedServerID    string
 
-	// 代理转发器 - 用于实际启动和管理代理服务
+	// 代理转发器 - 用于实际启动和管理代理服务（保留用于兼容）
 	ProxyForwarder *proxy.Forwarder
+
+	// Xray 实例 - 用于 xray-core 代理
+	XrayInstance *xray.XrayInstance
 
 	// 绑定数据 - 用于状态面板自动更新
 	ProxyStatusBinding binding.String // 代理状态文本
@@ -106,8 +110,21 @@ func (a *AppState) updateStatusBindings() {
 	isRunning := false
 	proxyPort := 0
 
-	if a.ProxyForwarder != nil && a.ProxyForwarder.IsRunning {
-		// 代理服务正在运行
+	// 检查 xray 实例是否运行（使用 IsRunning 方法检查真实运行状态）
+	if a.XrayInstance != nil && a.XrayInstance.IsRunning() {
+		// xray-core 代理正在运行
+		isRunning = true
+		// 优先从 xray 实例获取端口
+		if a.XrayInstance.GetPort() > 0 {
+			proxyPort = a.XrayInstance.GetPort()
+		} else if a.Config != nil && a.Config.AutoProxyPort > 0 {
+			// 如果实例中没有端口，从配置中获取
+			proxyPort = a.Config.AutoProxyPort
+		} else {
+			proxyPort = 10080 // 默认端口
+		}
+	} else if a.ProxyForwarder != nil && a.ProxyForwarder.IsRunning {
+		// 旧的代理转发器正在运行（兼容旧代码）
 		isRunning = true
 		// 从本地地址中提取端口
 		if a.Config != nil && a.Config.AutoProxyPort > 0 {
@@ -118,13 +135,13 @@ func (a *AppState) updateStatusBindings() {
 	if isRunning {
 		a.ProxyStatusBinding.Set("代理状态: 运行中")
 		if proxyPort > 0 {
-			a.PortBinding.Set(fmt.Sprintf("动态端口: %d", proxyPort))
+			a.PortBinding.Set(fmt.Sprintf("监听端口: %d", proxyPort))
 		} else {
-			a.PortBinding.Set("动态端口: -")
+			a.PortBinding.Set("监听端口: -")
 		}
 	} else {
 		a.ProxyStatusBinding.Set("代理状态: 未启动")
-		a.PortBinding.Set("动态端口: -")
+		a.PortBinding.Set("监听端口: -")
 	}
 
 	// 更新当前服务器
@@ -164,6 +181,8 @@ func (a *AppState) InitApp() {
 	// Fyne 应用初始化后，可以初始化绑定数据
 	a.updateStatusBindings()
 	a.updateSubscriptionLabels()
+	
+	// 注意：Logger的回调需要在LogsPanel创建后设置（在NewMainWindow之后）
 }
 
 // updateSubscriptionLabels 更新订阅标签绑定数据

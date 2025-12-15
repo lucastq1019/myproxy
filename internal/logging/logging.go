@@ -44,14 +44,20 @@ const (
 	LogTypeProxy LogType = "proxy"
 )
 
+// LogPanelCallback 日志面板回调函数类型
+// 当有新日志写入时，会调用此回调来更新UI
+type LogPanelCallback func(level, logType, message, logLine string)
+
 // Logger 日志记录器
+// 负责统一管理日志文件的写入和UI显示，确保两者一致
 type Logger struct {
-	level       LogLevel
-	files       map[LogType]*os.File
-	console     bool
-	mutex       sync.Mutex
-	logFilePath string
-	logDir      string
+	level          LogLevel
+	file           *os.File        // 单一日志文件
+	console        bool
+	mutex          sync.Mutex
+	logFilePath    string
+	logDir         string
+	panelCallback  LogPanelCallback // UI面板回调函数（用于实时更新UI）
 }
 
 const (
@@ -60,7 +66,12 @@ const (
 )
 
 // NewLogger 创建新的日志记录器
-func NewLogger(logFilePath string, console bool, level string) (*Logger, error) {
+// 参数：
+//   - logFilePath: 日志文件路径
+//   - console: 是否输出到控制台
+//   - level: 日志级别
+//   - panelCallback: UI面板回调函数（可选，用于实时更新UI显示）
+func NewLogger(logFilePath string, console bool, level string, panelCallback ...LogPanelCallback) (*Logger, error) {
 	// 解析日志级别
 	logLevel, err := parseLogLevel(level)
 	if err != nil {
@@ -73,12 +84,23 @@ func NewLogger(logFilePath string, console bool, level string) (*Logger, error) 
 	// 移除扩展名以获取基本名称
 	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
 
+	// 构建统一的日志文件路径
+	unifiedLogPath := logFilePath
+	// 如果路径没有扩展名，添加 .log
+	if filepath.Ext(unifiedLogPath) == "" {
+		unifiedLogPath = unifiedLogPath + ".log"
+	}
+
 	logger := &Logger{
 		level:       logLevel,
 		console:     console,
-		logFilePath: logFilePath,
+		logFilePath: unifiedLogPath,
 		logDir:      logDir,
-		files:       make(map[LogType]*os.File),
+	}
+	
+	// 设置UI面板回调（如果提供）
+	if len(panelCallback) > 0 && panelCallback[0] != nil {
+		logger.panelCallback = panelCallback[0]
 	}
 
 	// 创建目录（如果不存在）
@@ -86,27 +108,17 @@ func NewLogger(logFilePath string, console bool, level string) (*Logger, error) 
 		return nil, fmt.Errorf("创建日志目录失败: %w", err)
 	}
 
-	// 打开应用日志文件，启动时如果存在则归档
-	appLogPath := fmt.Sprintf("%s/%s_%s.log", logDir, baseName, LogTypeApp)
-	if err := logger.archiveIfExists(appLogPath); err != nil {
-		return nil, fmt.Errorf("归档应用日志文件失败: %w", err)
+	// 启动时如果日志文件存在则归档
+	if err := logger.archiveIfExists(unifiedLogPath); err != nil {
+		return nil, fmt.Errorf("归档日志文件失败: %w", err)
 	}
-	appFile, err := os.OpenFile(appLogPath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("打开应用日志文件失败: %w", err)
-	}
-	logger.files[LogTypeApp] = appFile
 
-	// 打开代理日志文件，启动时如果存在则归档
-	proxyLogPath := fmt.Sprintf("%s/%s_%s.log", logDir, baseName, LogTypeProxy)
-	if err := logger.archiveIfExists(proxyLogPath); err != nil {
-		return nil, fmt.Errorf("归档代理日志文件失败: %w", err)
-	}
-	proxyFile, err := os.OpenFile(proxyLogPath, os.O_CREATE|os.O_WRONLY, 0644)
+	// 打开统一的日志文件
+	logFile, err := os.OpenFile(unifiedLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("打开代理日志文件失败: %w", err)
+		return nil, fmt.Errorf("打开日志文件失败: %w", err)
 	}
-	logger.files[LogTypeProxy] = proxyFile
+	logger.file = logFile
 
 	return logger, nil
 }
@@ -212,23 +224,23 @@ func (l *Logger) log(level LogLevel, logType LogType, format string, args ...int
 		fmt.Print(logLine)
 	}
 
-	// 输出到对应类型的日志文件
-	file := l.files[logType]
-	if file != nil {
-		if _, err := file.WriteString(logLine); err != nil {
+	// 输出到统一的日志文件
+	if l.file != nil {
+		if _, err := l.file.WriteString(logLine); err != nil {
 			// 如果写入文件失败，尝试重新打开文件
-			l.reopenFile(logType)
+			l.reopenFile()
 			// 再次尝试写入
-			l.files[logType].WriteString(logLine)
+			if l.file != nil {
+				l.file.WriteString(logLine)
+			}
 		}
 	}
 
-	// 同时写入应用日志作为备份
-	if logType != LogTypeApp {
-		appFile := l.files[LogTypeApp]
-		if appFile != nil {
-			appFile.WriteString(logLine)
-		}
+	// 通知UI面板更新（确保文件写入和UI显示一致）
+	if l.panelCallback != nil {
+		// 移除末尾的换行符，因为UI显示不需要
+		logLineForUI := strings.TrimRight(logLine, "\n")
+		l.panelCallback(levelName, string(logType), message, logLineForUI)
 	}
 
 	// 如果是致命错误，退出程序
@@ -237,21 +249,23 @@ func (l *Logger) log(level LogLevel, logType LogType, format string, args ...int
 	}
 }
 
+// SetPanelCallback 设置UI面板回调函数
+func (l *Logger) SetPanelCallback(callback LogPanelCallback) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	l.panelCallback = callback
+}
+
 // reopenFile 重新打开日志文件
-func (l *Logger) reopenFile(logType LogType) {
-	file := l.files[logType]
-	if file != nil {
-		file.Close()
+func (l *Logger) reopenFile() {
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
 	}
 
-	// 构建对应类型的日志文件路径
-	baseName := filepath.Base(l.logFilePath)
-	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	logPath := fmt.Sprintf("%s/%s_%s.log", l.logDir, baseName, logType)
-
-	newFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	newFile, err := os.OpenFile(l.logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err == nil {
-		l.files[logType] = newFile
+		l.file = newFile
 	}
 }
 
@@ -310,12 +324,10 @@ func (l *Logger) Close() {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
-	// 关闭所有日志文件
-	for logType, file := range l.files {
-		if file != nil {
-			file.Close()
-			l.files[logType] = nil
-		}
+	// 关闭日志文件
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
 	}
 }
 
@@ -324,94 +336,50 @@ func (l *Logger) Rotate() error {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
-	baseName := filepath.Base(l.logFilePath)
-	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
 	timestamp := time.Now().Format("20060102150405")
 
-	// 对每个日志文件进行轮转
-	for logType, file := range l.files {
-		if file != nil {
-			file.Close()
-		}
-
-		// 构建当前日志文件路径
-		logPath := fmt.Sprintf("%s/%s_%s.log", l.logDir, baseName, logType)
-
-		// 备份当前日志文件
-		if _, err := os.Stat(logPath); err == nil {
-			backupPath := fmt.Sprintf("%s.%s", logPath, timestamp)
-			if err := os.Rename(logPath, backupPath); err != nil {
-				return fmt.Errorf("备份日志文件失败: %w", err)
-			}
-		}
-
-		// 重新打开日志文件
-		newFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("重新打开日志文件失败: %w", err)
-		}
-
-		l.files[logType] = newFile
+	// 关闭当前日志文件
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
 	}
 
+	// 备份当前日志文件
+	if _, err := os.Stat(l.logFilePath); err == nil {
+		backupPath := fmt.Sprintf("%s.%s", l.logFilePath, timestamp)
+		if err := os.Rename(l.logFilePath, backupPath); err != nil {
+			return fmt.Errorf("备份日志文件失败: %w", err)
+		}
+	}
+
+	// 重新打开日志文件
+	newFile, err := os.OpenFile(l.logFilePath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("重新打开日志文件失败: %w", err)
+	}
+
+	l.file = newFile
 	return nil
 }
 
-// GetLogs 获取所有日志内容，合并所有日志文件的内容
+// GetLogs 获取所有日志内容
 func (l *Logger) GetLogs(lines int) ([]string, error) {
-	var allLines []string
-
-	// 获取所有日志文件的内容
-	baseName := filepath.Base(l.logFilePath)
-	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
-
-	// 按日志类型顺序获取日志（应用日志优先）
-	logTypes := []LogType{LogTypeApp, LogTypeProxy}
-	for _, logType := range logTypes {
-		logPath := fmt.Sprintf("%s/%s_%s.log", l.logDir, baseName, logType)
-
-		// 打开日志文件
-		file, err := os.Open(logPath)
-		if err != nil {
-			continue // 忽略不存在的文件
-		}
-
-		// 读取文件内容
-		content, err := io.ReadAll(file)
-		file.Close()
-		if err != nil {
-			continue // 忽略读取错误
-		}
-
-		// 按行分割
-		logLines := strings.Split(string(content), "\n")
-		// 移除最后一个空行
-		if len(logLines) > 0 && logLines[len(logLines)-1] == "" {
-			logLines = logLines[:len(logLines)-1]
-		}
-
-		// 添加到所有行
-		allLines = append(allLines, logLines...)
-	}
-
-	// 返回最后 N 行
-	start := 0
-	if len(allLines) > lines {
-		start = len(allLines) - lines
-	}
-
-	return allLines[start:], nil
+	return l.GetLogsByType("", lines)
 }
 
-// GetLogsByType 获取指定类型的日志内容
-func (l *Logger) GetLogsByType(logType LogType, lines int) ([]string, error) {
-	baseName := filepath.Base(l.logFilePath)
-	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	logPath := fmt.Sprintf("%s/%s_%s.log", l.logDir, baseName, logType)
+// GetLogFilePath 获取日志文件路径
+func (l *Logger) GetLogFilePath() string {
+	return l.logFilePath
+}
 
-	// 打开日志文件
-	file, err := os.Open(logPath)
+// GetLogsByType 获取指定类型的日志内容（logType 参数已废弃，保留用于兼容性）
+func (l *Logger) GetLogsByType(logType LogType, lines int) ([]string, error) {
+	// 打开统一的日志文件
+	file, err := os.Open(l.logFilePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil // 文件不存在，返回空列表
+		}
 		return nil, fmt.Errorf("打开日志文件失败: %w", err)
 	}
 	defer file.Close()

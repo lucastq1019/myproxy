@@ -26,17 +26,38 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 		appState: appState,
 	}
 
+	// 检查绑定数据是否已初始化
+	if appState == nil {
+		// 如果 appState 为 nil，创建默认标签（不应该发生，但作为安全措施）
+		sp.proxyStatusLabel = widget.NewLabel("代理状态: 未知")
+		sp.portLabel = widget.NewLabel("动态端口: -")
+		sp.serverNameLabel = widget.NewLabel("当前服务器: 无")
+		return sp
+	}
+
 	// 使用绑定数据创建标签，实现自动更新
 	// 代理状态标签 - 绑定到 ProxyStatusBinding
-	sp.proxyStatusLabel = widget.NewLabelWithData(appState.ProxyStatusBinding)
+	if appState.ProxyStatusBinding != nil {
+		sp.proxyStatusLabel = widget.NewLabelWithData(appState.ProxyStatusBinding)
+	} else {
+		sp.proxyStatusLabel = widget.NewLabel("代理状态: 未知")
+	}
 	sp.proxyStatusLabel.Wrapping = fyne.TextWrapOff
 
 	// 端口标签 - 绑定到 PortBinding
-	sp.portLabel = widget.NewLabelWithData(appState.PortBinding)
+	if appState.PortBinding != nil {
+		sp.portLabel = widget.NewLabelWithData(appState.PortBinding)
+	} else {
+		sp.portLabel = widget.NewLabel("动态端口: -")
+	}
 	sp.portLabel.Wrapping = fyne.TextWrapOff
 
 	// 服务器名称标签 - 绑定到 ServerNameBinding
-	sp.serverNameLabel = widget.NewLabelWithData(appState.ServerNameBinding)
+	if appState.ServerNameBinding != nil {
+		sp.serverNameLabel = widget.NewLabelWithData(appState.ServerNameBinding)
+	} else {
+		sp.serverNameLabel = widget.NewLabel("当前服务器: 无")
+	}
 	sp.serverNameLabel.Wrapping = fyne.TextWrapOff
 
 	return sp
@@ -64,9 +85,6 @@ func (sp *StatusPanel) Build() fyne.CanvasObject {
 		nil,                   // 右侧：无
 		statusArea,            // 中间：状态信息内容（HBox 水平布局）
 	)
-
-	// 确保容器可见
-	result.Show()
 
 	return result
 }
