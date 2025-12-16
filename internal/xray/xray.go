@@ -89,6 +89,11 @@ func (lw *logWriter) processLogLine(line string) {
 	// 移除可能的回车符
 	line = strings.TrimRight(line, "\r\n")
 
+	// 过滤掉无意义的频繁日志
+	if lw.shouldFilterLog(line) {
+		return
+	}
+
 	// 解析日志级别（xray-core 的日志格式通常包含级别信息）
 	level := "INFO"
 	message := line
@@ -107,6 +112,28 @@ func (lw *logWriter) processLogLine(line string) {
 
 	// 调用回调函数
 	lw.callback(level, message)
+}
+
+// shouldFilterLog 判断是否应该过滤掉这条日志
+// 过滤掉频繁出现且无意义的日志，减少日志噪音
+func (lw *logWriter) shouldFilterLog(line string) bool {
+	// 过滤规则：匹配频繁出现的无意义日志模式
+	filterPatterns := []string{
+		"proxy/socks: Not Socks request, try to parse as HTTP request",
+		"proxy/http: request to Method [CONNECT]",
+		"app/dispatcher: default route for",
+		"transport/internet/tcp: dialing TCP to",
+		"transport/internet: dialing to",
+	}
+
+	upperLine := strings.ToUpper(line)
+	for _, pattern := range filterPatterns {
+		if strings.Contains(upperLine, strings.ToUpper(pattern)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // XrayInstance 封装 xray-core 实例
@@ -544,8 +571,14 @@ func CreateXrayConfig(localPort int, server *config.Server, logFilePath ...strin
 	}
 
 	// 构建日志配置
+	// 使用 warning 级别，只输出警告和错误，减少无意义的调试日志
+	// 常见的无意义日志包括：
+	// - [Debug] proxy/socks: Not Socks request, try to parse as HTTP request
+	// - [Info] proxy/http: request to Method [CONNECT]
+	// - [Info] app/dispatcher: default route
+	// - [Info] transport/internet/tcp: dialing TCP
 	logConfig := map[string]interface{}{
-		"loglevel": "debug", // 使用 debug 级别以便输出所有日志
+		"loglevel": "warning", // 只输出警告和错误，过滤掉频繁的调试信息
 	}
 
 	// 如果提供了日志文件路径，设置日志输出到文件
