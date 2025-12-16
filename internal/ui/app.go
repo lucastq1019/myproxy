@@ -158,7 +158,18 @@ func (a *AppState) UpdateProxyStatus() {
 // 该方法会创建应用实例、设置主题、创建主窗口，并初始化数据绑定。
 // 注意：必须在创建 UI 组件之前调用此方法。
 func (a *AppState) InitApp() {
-	a.App = app.New()
+	a.App = app.NewWithID("com.myproxy.socks5")
+	
+	// 设置应用图标（使用自定义图标）
+	// 这会同时设置 Dock 图标和窗口图标（在 macOS 上）
+	appIcon := createAppIcon()
+	if appIcon != nil {
+		a.App.SetIcon(appIcon)
+		fmt.Println("应用图标已设置（包括 Dock 图标）")
+	} else {
+		fmt.Println("警告: 应用图标创建失败")
+	}
+	
 	// 从数据库加载主题配置，默认使用黑色主题
 	themeVariant := theme.VariantDark
 	if themeStr, err := database.GetAppConfigWithDefault("theme", "dark"); err == nil && themeStr == "light" {

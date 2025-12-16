@@ -63,6 +63,7 @@ dist/
 build/
 bin/
 out/
+assets/
 
 # 环境变量文件
 .env

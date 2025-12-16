@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -40,7 +41,6 @@ func main() {
 
 	// 初始化应用（创建Fyne应用和窗口）
 	appState.InitApp()
-	// 应用将使用Fyne默认图标
 
 	// 创建主窗口（此时LogsPanel已创建）
 	mainWindow := ui.NewMainWindow(appState)
@@ -73,23 +73,29 @@ func main() {
 		appState.Window.SetContent(content)
 	}
 
-	// 设置窗口关闭事件，保存配置
+	// 创建并设置系统托盘（使用 Fyne 原生 API，不需要单独的 goroutine）
+	trayManager := ui.NewTrayManager(appState)
+	fmt.Println("开始设置系统托盘...")
+	trayManager.SetupTray()
+	fmt.Println("系统托盘设置完成")
+
+	// 设置窗口关闭事件，隐藏到托盘而不是退出
 	appState.Window.SetCloseIntercept(func() {
-		// 停止日志监控
-		if appState.LogsPanel != nil {
-			appState.LogsPanel.Stop()
-		}
 		// 保存布局配置到数据库
 		mainWindow.SaveLayoutConfig()
 		// 保存应用配置到数据库
 		if err := saveConfigToDB(cfg); err != nil {
 			log.Printf("保存配置到数据库失败: %v", err)
 		}
-		appState.Window.Close()
+		// 隐藏窗口而不是关闭（Fyne 会自动处理 Dock 图标点击显示窗口）
+		appState.Window.Hide()
 	})
+	fmt.Println("设置窗口关闭事件")
 
-	// 运行应用
-	appState.Window.ShowAndRun()
+	// 显示窗口并运行应用
+	appState.Window.Show()
+	appState.App.Run()
+	fmt.Println("应用运行结束")
 }
 
 // loadConfigFromDB 从数据库加载配置，如果不存在则从 JSON 文件加载并迁移到数据库。
