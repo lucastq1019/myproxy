@@ -4,7 +4,6 @@ go 1.25.4
 
 require (
 	fyne.io/fyne/v2 v2.7.1
-	fyne.io/systray v1.11.1-0.20250603113521-ca66a66d8b58
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/xtls/xray-core v1.251208.0
@@ -12,6 +11,7 @@ require (
 )
 
 require (
+	fyne.io/systray v1.11.1-0.20250603113521-ca66a66d8b58 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect

@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/fsnotify/fsnotify"
+	"myproxy.com/p/internal/database"
 )
 
 // LogEntry 表示一条日志条目
@@ -40,6 +41,10 @@ type LogsPanel struct {
 	ctx           context.Context    // 上下文，用于控制监控 goroutine
 	cancel        context.CancelFunc // 取消函数
 	lastReadPos   int64              // 最后读取的位置
+	isCollapsed   bool               // 是否折叠
+	collapseBtn   *widget.Button     // 折叠/展开按钮
+	logScroll     *container.Scroll  // 日志滚动容器
+	panelContainer fyne.CanvasObject // 面板容器
 }
 
 // NewLogsPanel 创建并初始化日志显示面板。
@@ -53,12 +58,23 @@ func NewLogsPanel(appState *AppState) *LogsPanel {
 		appState:      appState,
 		logBuffer:     make([]LogEntry, 0),
 		maxBufferSize: 1000, // 最多保存1000条日志
+		isCollapsed:   true, // 默认折叠，符合“默认隐藏，需要时深入”的设计
+	}
+
+	// 从数据库加载折叠状态（优先用户之前的选择）
+	if collapsed, err := database.GetAppConfig("logsCollapsed"); err == nil {
+		// "true" -> 折叠; "false" -> 展开; 其他值保持默认
+		if collapsed == "true" {
+			lp.isCollapsed = true
+		} else if collapsed == "false" {
+			lp.isCollapsed = false
+		}
 	}
 
 	// 日志内容 - 使用 RichText 以支持自定义文本颜色
 	lp.logContent = widget.NewRichText()
 	lp.logContent.Wrapping = fyne.TextWrapOff // 关闭自动换行，使用水平滚动
-	// 设置等宽字体样式
+	// 设置等宽字体样式和初始段落样式（优化行高）
 	lp.logContent.Segments = []widget.RichTextSegment{}
 
 	// 日志级别选择
@@ -99,28 +115,134 @@ func NewLogsPanel(appState *AppState) *LogsPanel {
 // Build 构建并返回日志显示面板的 UI 组件。
 // 返回：包含过滤控件和日志内容的容器组件
 func (lp *LogsPanel) Build() fyne.CanvasObject {
-	// 顶部控制栏
+	// 创建折叠/展开按钮 - 使用图标按钮
+	var collapseIcon fyne.Resource
+	if lp.isCollapsed {
+		collapseIcon = theme.MenuExpandIcon()
+	} else {
+		collapseIcon = theme.MenuDropDownIcon()
+	}
+	lp.collapseBtn = NewIconButton(collapseIcon, func() {
+		lp.toggleCollapse()
+	})
+	lp.updateCollapseButtonText()
+
+	// 标题标签（使用标题样式）
+	titleLabel := NewTitleLabel("日志")
+
+	// 级别标签（使用副标题样式）
+	levelLabel := NewSubtitleLabel("级别")
+
+	// 类型标签（使用副标题样式）
+	typeLabel := NewSubtitleLabel("类型")
+
+	// 刷新按钮 - 添加图标
+	refreshBtn := NewStyledButton("刷新", theme.ViewRefreshIcon(), func() {
+		lp.loadInitialLogs()
+	})
+
+	// 顶部控制栏 - 优化布局和间距
 	topBar := container.NewHBox(
-		widget.NewLabel("日志: "),
-		container.NewGridWrap(fyne.NewSize(80, 40), lp.levelSel),
-		widget.NewLabel("类型: "),
-		container.NewGridWrap(fyne.NewSize(80, 40), lp.typeSel),
-		widget.NewButton("刷新", func() {
-			lp.loadInitialLogs()
-		}),
+		lp.collapseBtn, // 折叠/展开按钮
+		NewSpacer(SpacingSmall),
+		titleLabel,
+		NewSpacer(SpacingLarge),
+		levelLabel,
+		NewSpacer(SpacingSmall),
+		container.NewGridWrap(fyne.NewSize(100, 40), lp.levelSel),
+		NewSpacer(SpacingLarge),
+		typeLabel,
+		NewSpacer(SpacingSmall),
+		container.NewGridWrap(fyne.NewSize(100, 40), lp.typeSel),
+		NewSpacer(SpacingLarge),
+		refreshBtn,
 		layout.NewSpacer(),
 	)
+	// 添加内边距
+	topBar = container.NewPadded(topBar)
 
 	// 日志内容区域
-	logScroll := container.NewScroll(lp.logContent)
+	lp.logScroll = container.NewScroll(lp.logContent)
 
-	return container.NewBorder(
-		topBar,
+	// 创建面板容器
+	lp.panelContainer = container.NewBorder(
+		container.NewVBox(
+			topBar,
+			NewSeparator(),
+		),
 		nil,
 		nil,
 		nil,
-		logScroll,
+		lp.logScroll,
 	)
+
+	// 根据折叠状态设置初始显示
+	lp.updateCollapseState()
+
+	return lp.panelContainer
+}
+
+// toggleCollapse 切换折叠/展开状态
+func (lp *LogsPanel) toggleCollapse() {
+	lp.isCollapsed = !lp.isCollapsed
+	lp.updateCollapseState()
+	lp.updateCollapseButtonText()
+	
+	// 保存状态到数据库
+	state := "false"
+	if lp.isCollapsed {
+		state = "true"
+	}
+	if err := database.SetAppConfig("logsCollapsed", state); err != nil {
+		if lp.appState != nil && lp.appState.Logger != nil {
+			lp.appState.Logger.Error("保存日志折叠状态失败: %v", err)
+		}
+	}
+	
+	// 通知主窗口更新布局
+	if lp.appState != nil && lp.appState.MainWindow != nil {
+		lp.appState.MainWindow.UpdateLogsCollapseState(lp.isCollapsed)
+	}
+}
+
+// updateCollapseState 更新折叠状态显示
+func (lp *LogsPanel) updateCollapseState() {
+	if lp.logScroll == nil {
+		return
+	}
+	
+	if lp.isCollapsed {
+		// 折叠：隐藏日志内容，只显示控制栏
+		lp.logScroll.Hide()
+	} else {
+		// 展开：显示日志内容
+		lp.logScroll.Show()
+	}
+	
+	// 刷新容器
+	if lp.panelContainer != nil {
+		lp.panelContainer.Refresh()
+	}
+}
+
+// updateCollapseButtonText 更新折叠按钮图标
+func (lp *LogsPanel) updateCollapseButtonText() {
+	if lp.collapseBtn == nil {
+		return
+	}
+	
+	var icon fyne.Resource
+	if lp.isCollapsed {
+		icon = theme.MenuExpandIcon()
+	} else {
+		icon = theme.MenuDropDownIcon()
+	}
+	lp.collapseBtn.SetIcon(icon)
+}
+
+// IsCollapsed 返回当前是否折叠
+func (lp *LogsPanel) IsCollapsed() bool {
+	return lp.isCollapsed
 }
 
 // AppendLog 追加一条日志到日志面板（线程安全）
@@ -345,14 +467,17 @@ func (lp *LogsPanel) refreshDisplay() {
 		filteredEntries = append(filteredEntries, entry)
 	}
 
-	// 构建显示文本
+	// 构建显示文本 - 优化字体和行高
 	var segments []widget.RichTextSegment
 	for _, entry := range filteredEntries {
+		// 根据日志级别设置不同的颜色（在黑白主题中，使用不同的灰度）
+		colorName := theme.ColorNameForeground
+		// 可以根据级别调整样式，但保持黑白主题
 		segments = append(segments, &widget.TextSegment{
 			Text: entry.Line + "\n",
 			Style: widget.RichTextStyle{
-				ColorName: theme.ColorNameForeground,
-				TextStyle: fyne.TextStyle{Monospace: true},
+				ColorName: colorName,
+				TextStyle: fyne.TextStyle{Monospace: true}, // 等宽字体
 			},
 		})
 	}
@@ -362,28 +487,6 @@ func (lp *LogsPanel) refreshDisplay() {
 		lp.logContent.Segments = segments
 		lp.logContent.Refresh()
 	})
-}
-
-// containsLogLevel 检查日志行是否包含指定级别
-func (lp *LogsPanel) containsLogLevel(logLine, level string) bool {
-	if level == "全部" {
-		return true
-	}
-	// 日志格式: timestamp [LEVEL] [type] message
-	// 查找 [LEVEL] 格式
-	levelPattern := "[" + level + "]"
-	return strings.Contains(logLine, levelPattern)
-}
-
-// containsLogType 检查日志行是否包含指定类型
-func (lp *LogsPanel) containsLogType(logLine, logType string) bool {
-	if logType == "全部" {
-		return true
-	}
-	// 日志格式: timestamp [LEVEL] [type] message
-	// 查找 [type] 格式
-	typePattern := "[" + logType + "]"
-	return strings.Contains(logLine, typePattern)
 }
 
 // Refresh 刷新日志显示，重新应用当前过滤条件。
@@ -437,11 +540,6 @@ func (lp *LogsPanel) StartLogFileWatcher() {
 
 	// 启动监控 goroutine
 	go lp.watchLogFile()
-}
-
-// startLogFileWatcher 内部方法，已废弃，使用 StartLogFileWatcher
-func (lp *LogsPanel) startLogFileWatcher() {
-	lp.StartLogFileWatcher()
 }
 
 // watchLogFile 监控日志文件变化

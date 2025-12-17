@@ -4,18 +4,24 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
+	"os"
 
 	"myproxy.com/p/internal/xray"
 )
 
 // 示例 1: 从文件加载 xray 配置
+// 注意：NewXrayInstanceFromFile 已移除，请使用 NewXrayInstanceFromJSON
 func example1_LoadFromFile() {
-	instance, err := xray.NewXrayInstanceFromFile("xray_config.json")
+	// 读取配置文件
+	configBytes, err := os.ReadFile("xray_config.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	instance, err := xray.NewXrayInstanceFromJSON(configBytes)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -96,32 +102,33 @@ func example3_UseAsProxy() {
 		log.Fatal(err)
 	}
 
-	// 通过 xray-core 连接到目标地址
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, err := instance.DialContext(ctx, "tcp", "www.example.com:80")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-
-	log.Println("成功通过 xray-core 连接到目标")
+	// 注意：DialContext 和 Dial 方法已移除
+	// xray-core 通过配置自动处理所有连接，不需要手动调用连接方法
+	log.Println("Xray-core 实例已启动，连接将通过配置自动处理")
 }
 
 // 示例 4: 动态创建 VMess 出站配置
+// 注意：CreateVMessOutbound 已移除，请使用 CreateOutboundFromServer 或手动构建配置
 func example4_VMessOutbound() {
-	// 创建 VMess 出站配置
-	vmessConfig, err := xray.CreateVMessOutbound(
-		"vmess-out",
-		"server.example.com",
-		443,
-		"uuid-here",
-		"auto",
-		0,
-	)
-	if err != nil {
-		log.Fatal(err)
+	// 手动构建 VMess 出站配置
+	vmessConfig := map[string]interface{}{
+		"tag":      "vmess-out",
+		"protocol": "vmess",
+		"settings": map[string]interface{}{
+			"vnext": []map[string]interface{}{
+				{
+					"address": "server.example.com",
+					"port":    443,
+					"users": []map[string]interface{}{
+						{
+							"id":       "uuid-here",
+							"alterId":  0,
+							"security": "auto",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	// 构建完整的 xray 配置
@@ -130,7 +137,7 @@ func example4_VMessOutbound() {
 			"loglevel": "warning",
 		},
 		"outbounds": []interface{}{
-			json.RawMessage(vmessConfig),
+			vmessConfig,
 		},
 	}
 
@@ -150,16 +157,27 @@ func example4_VMessOutbound() {
 }
 
 // 示例 5: 创建带认证的 SOCKS5 出站
+// 注意：CreateSimpleSOCKS5Outbound 已移除，请手动构建配置
 func example5_SOCKS5WithAuth() {
-	socksConfig, err := xray.CreateSimpleSOCKS5Outbound(
-		"socks-out",
-		"proxy.example.com",
-		1080,
-		"username",
-		"password",
-	)
-	if err != nil {
-		log.Fatal(err)
+	// 手动构建 SOCKS5 出站配置
+	socksConfig := map[string]interface{}{
+		"tag":      "socks-out",
+		"protocol": "socks",
+		"settings": map[string]interface{}{
+			"auth": "password",
+			"accounts": []map[string]string{
+				{
+					"user": "username",
+					"pass": "password",
+				},
+			},
+			"servers": []map[string]interface{}{
+				{
+					"address": "proxy.example.com",
+					"port":    1080,
+				},
+			},
+		},
 	}
 
 	// 构建完整配置
@@ -168,11 +186,7 @@ func example5_SOCKS5WithAuth() {
 			"loglevel": "warning",
 		},
 		"outbounds": []interface{}{
-			map[string]interface{}{
-				"tag":      "socks-out",
-				"protocol": "socks",
-				"settings": json.RawMessage(socksConfig),
-			},
+			socksConfig,
 		},
 	}
 
@@ -210,8 +224,9 @@ func example6_IntegrateWithForwarder() {
 		var err error
 
 		if f.UseXray && f.XrayInstance != nil {
-			// 使用 xray-core
-			proxyConn, err = f.XrayInstance.Dial("tcp", f.RemoteAddr)
+			// 注意：Dial 方法已移除，xray-core 通过配置自动处理连接
+			// 请使用配置方式启动 xray-core，它会自动处理所有连接
+			// proxyConn, err = f.XrayInstance.Dial("tcp", f.RemoteAddr)
 			if err != nil {
 				f.log("ERROR", "proxy", "通过 xray-core 连接失败: %v", err)
 				return

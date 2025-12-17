@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	stdnet "net"
-	"os"
 	"strings"
 	"sync"
 
@@ -147,15 +145,6 @@ type XrayInstance struct {
 	logCallback LogCallback // 日志回调函数
 }
 
-// NewXrayInstanceFromFile 从配置文件创建 xray-core 实例
-func NewXrayInstanceFromFile(configPath string) (*XrayInstance, error) {
-	configBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
-	}
-	return NewXrayInstanceFromJSON(configBytes)
-}
-
 // NewXrayInstanceFromJSON 从 JSON 配置创建 xray-core 实例
 func NewXrayInstanceFromJSON(configJSON []byte) (*XrayInstance, error) {
 	return NewXrayInstanceFromJSONWithCallback(configJSON, nil)
@@ -247,66 +236,6 @@ func (xi *XrayInstance) GetPort() int {
 // GetInstance 获取底层 xray-core 实例（用于高级操作）
 func (xi *XrayInstance) GetInstance() *core.Instance {
 	return xi.instance
-}
-
-// CreateSimpleSOCKS5Outbound 创建简单的 SOCKS5 出站配置
-func CreateSimpleSOCKS5Outbound(tag, address string, port int, username, password string) ([]byte, error) {
-	socksConfig := map[string]interface{}{
-		"auth": "noauth",
-		"servers": []map[string]interface{}{
-			{
-				"address": address,
-				"port":    port,
-			},
-		},
-	}
-
-	if username != "" && password != "" {
-		socksConfig["auth"] = "password"
-		socksConfig["accounts"] = []map[string]string{
-			{
-				"user": username,
-				"pass": password,
-			},
-		}
-	}
-
-	return json.Marshal(socksConfig)
-}
-
-// CreateVMessOutbound 创建 VMess 出站配置示例
-func CreateVMessOutbound(tag, address string, port int, uuid, security string, alterID int) ([]byte, error) {
-	vmessConfig := map[string]interface{}{
-		"vnext": []map[string]interface{}{
-			{
-				"address": address,
-				"port":    port,
-				"users": []map[string]interface{}{
-					{
-						"id":       uuid,
-						"alterId":  alterID,
-						"security": security,
-					},
-				},
-			},
-		},
-	}
-
-	return json.Marshal(vmessConfig)
-}
-
-// DialContext 通过 xray-core 连接到目标地址
-// 注意：此方法在当前实现中可能不需要，因为xray-core通过配置自动处理连接
-// 如果需要使用此方法，需要根据实际的xray-core API进行调整
-func (xi *XrayInstance) DialContext(ctx context.Context, network, address string) (stdnet.Conn, error) {
-	// TODO: 根据实际的xray-core API实现连接逻辑
-	// 当前实现中，xray-core通过配置自动处理所有连接，不需要手动调用此方法
-	return nil, fmt.Errorf("DialContext方法暂未实现，请使用配置方式启动xray-core")
-}
-
-// Dial 简化版本的连接方法
-func (xi *XrayInstance) Dial(network, address string) (stdnet.Conn, error) {
-	return xi.DialContext(context.Background(), network, address)
 }
 
 // CreateOutboundFromServer 根据服务器配置创建 xray 出站配置

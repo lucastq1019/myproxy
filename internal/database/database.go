@@ -344,19 +344,6 @@ func GetAllSubscriptions() ([]*Subscription, error) {
 	return subscriptions, nil
 }
 
-// DeleteSubscription 删除指定的订阅及其关联的所有服务器。
-// 参数：
-//   - url: 要删除的订阅 URL
-//
-// 返回：错误（如果有）
-func DeleteSubscription(url string) error {
-	_, err := DB.Exec("DELETE FROM subscriptions WHERE url = ?", url)
-	if err != nil {
-		return fmt.Errorf("删除订阅失败: %w", err)
-	}
-	return nil
-}
-
 // AddOrUpdateServer 添加新服务器或更新现有服务器。
 // 如果服务器 ID 已存在，则更新其信息；否则创建新服务器。
 // 如果 subscriptionID 为 nil 且服务器已存在，则保持原有的 subscription_id。
@@ -429,29 +416,6 @@ func AddOrUpdateServer(server config.Server, subscriptionID *int64) error {
 	}
 
 	return nil
-}
-
-// GetServerSubscriptionID 获取服务器关联的订阅 ID。
-// 参数：
-//   - serverID: 服务器 ID
-//
-// 返回：订阅 ID（如果存在）和错误（如果有）
-func GetServerSubscriptionID(serverID string) (*int64, error) {
-	var subscriptionID sql.NullInt64
-	err := DB.QueryRow("SELECT subscription_id FROM servers WHERE id = ?", serverID).
-		Scan(&subscriptionID)
-
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("查询服务器订阅ID失败: %w", err)
-	}
-
-	if subscriptionID.Valid {
-		return &subscriptionID.Int64, nil
-	}
-	return nil, nil
 }
 
 // GetServer 根据 ID 获取服务器信息。
@@ -675,27 +639,6 @@ func GetLayoutConfig(key string) (string, error) {
 	}
 	if err != nil {
 		return "", fmt.Errorf("获取布局配置失败: %w", err)
-	}
-	return value, nil
-}
-
-// GetLayoutConfigWithDefault 获取布局配置，如果不存在则返回默认值。
-// 参数：
-//   - key: 配置键名
-//   - defaultValue: 默认值（当配置不存在时返回）
-//
-// 返回：配置值或默认值和错误（如果有）
-func GetLayoutConfigWithDefault(key, defaultValue string) (string, error) {
-	value, err := GetLayoutConfig(key)
-	if err != nil {
-		return "", err
-	}
-	if value == "" {
-		// 如果不存在，写入默认值
-		if err := SetLayoutConfig(key, defaultValue); err != nil {
-			return "", err
-		}
-		return defaultValue, nil
 	}
 	return value, nil
 }

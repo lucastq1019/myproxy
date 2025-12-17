@@ -5,6 +5,9 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 	"myproxy.com/p/internal/database"
 )
 
@@ -34,10 +37,13 @@ type MainWindow struct {
 	serverListPanel   *ServerListPanel
 	logsPanel         *LogsPanel
 	statusPanel       *StatusPanel
-	mainSplit         *container.Split // 主分割容器（服务器列表和日志）
-	topSplit          *container.Split // 顶部分割容器（订阅管理和主内容）
-	middleStatusSplit *container.Split // 中间和状态的分割容器
+	mainSplit         *container.Split // 主分割容器（服务器列表和日志，保留用于日志面板独立窗口等场景）
 	layoutConfig      *LayoutConfig    // 布局配置
+
+	// 单窗口多页面：通过 SetContent() 在一个窗口内切换不同的 Container
+	homePage     fyne.CanvasObject // 主界面（极简一键开关）
+	nodePage     fyne.CanvasObject // 节点列表页面
+	settingsPage fyne.CanvasObject // 设置页面
 }
 
 // NewMainWindow 创建并初始化主窗口。
@@ -110,85 +116,17 @@ func (mw *MainWindow) saveLayoutConfig() {
 // 该方法使用自定义 Border 布局，支持百分比控制各区域的大小。
 // 返回：主窗口的根容器组件
 func (mw *MainWindow) Build() fyne.CanvasObject {
-	// 确保所有面板都已初始化
-	if mw.serverListPanel == nil || mw.logsPanel == nil ||
-		mw.subscriptionPanel == nil || mw.statusPanel == nil {
-		// 如果面板未初始化，返回一个空的容器（不应该发生，但作为安全措施）
-		return container.NewWithoutLayout()
+	// 新主界面：遵循 UI 设计规范，采用“单窗口 + 多页面”设计。
+	// 通过 Window.SetContent() 在 homePage / nodePage / settingsPage 之间切换。
+
+	// 初始化各页面（home/node/settings）
+	mw.initPages()
+
+	// 默认返回 homePage 作为初始内容
+	if mw.homePage != nil {
+		return mw.homePage
 	}
-
-	// 服务器列表和日志的垂直分割
-	serverListArea := mw.serverListPanel.Build()
-	logArea := mw.logsPanel.Build()
-
-	// 确保构建的组件不为 nil
-	if serverListArea == nil {
-		serverListArea = container.NewWithoutLayout()
-	}
-	if logArea == nil {
-		logArea = container.NewWithoutLayout()
-	}
-
-	// 创建分割容器，确保两个子组件都不为 nil
-	// 使用 defer recover 来确保即使创建失败也不会崩溃
-	mw.mainSplit = container.NewVSplit(serverListArea, logArea)
-
-	// 确保分割容器已正确初始化
-	if mw.mainSplit != nil {
-		// 从配置加载分割位置
-		if mw.layoutConfig != nil && mw.layoutConfig.ServerListOffset > 0 {
-			mw.mainSplit.Offset = mw.layoutConfig.ServerListOffset
-		} else {
-			// 默认位置：服务器列表50%，日志25%
-			// 比例 = 50/(50+25) = 0.6667
-			mw.mainSplit.Offset = 0.6667
-		}
-
-		// 确保分割容器可见并已初始化
-		mw.mainSplit.Show()
-	}
-
-	// 订阅管理区域
-	subscriptionArea := mw.subscriptionPanel.Build()
-	if subscriptionArea == nil {
-		subscriptionArea = container.NewWithoutLayout()
-	}
-
-	// 状态信息区域
-	statusArea := mw.statusPanel.Build()
-	if statusArea == nil {
-		statusArea = container.NewWithoutLayout()
-	}
-
-	// 使用自定义 Border 布局，支持百分比控制
-	// top=订阅管理（20%），bottom=状态信息（5%），center=服务器列表和日志（75%）
-	topPercent := 0.2
-	bottomPercent := 0.05
-
-	// 从配置加载比例
-	if mw.layoutConfig.SubscriptionOffset > 0 {
-		topPercent = mw.layoutConfig.SubscriptionOffset
-	}
-	if mw.layoutConfig.StatusOffset > 0 {
-		// StatusOffset 是中间内容的比例，需要转换为底部比例
-		// StatusOffset = 0.9375 表示中间占 93.75%，底部占 6.25%
-		// 但我们要的是 5% = 0.05
-		bottomPercent = 1.0 - mw.layoutConfig.StatusOffset
-		if bottomPercent > 0.1 {
-			bottomPercent = 0.05 // 限制最大为 5%
-		}
-	}
-
-	customLayout := NewCustomBorderLayout(topPercent, bottomPercent)
-
-	// 使用自定义 Border 布局
-	return container.New(customLayout,
-		subscriptionArea, // 顶部：订阅管理
-		statusArea,       // 底部：状态信息
-		nil,              // 左侧：无
-		nil,              // 右侧：无
-		mw.mainSplit,     // 中间：服务器列表和日志的分割容器（自动拉伸）
-	)
+	return container.NewWithoutLayout()
 }
 
 // Refresh 刷新主窗口的所有面板，包括服务器列表、日志显示和订阅管理。
@@ -218,8 +156,7 @@ func (mw *MainWindow) SaveLayoutConfig() {
 	if mw.mainSplit != nil {
 		mw.layoutConfig.ServerListOffset = mw.mainSplit.Offset
 	}
-	// 注意：使用自定义 Border 布局后，topSplit 和 middleStatusSplit 不再使用
-	// 布局比例由 customLayout 控制，但配置仍然保存到数据库
+	// 布局比例由 customLayout 控制，配置保存到数据库
 	mw.saveLayoutConfig()
 }
 
@@ -227,4 +164,170 @@ func (mw *MainWindow) SaveLayoutConfig() {
 // 返回：布局配置实例，如果未初始化则返回默认配置
 func (mw *MainWindow) GetLayoutConfig() *LayoutConfig {
 	return mw.layoutConfig
+}
+
+// UpdateLogsCollapseState 更新日志折叠状态并调整布局
+func (mw *MainWindow) UpdateLogsCollapseState(isCollapsed bool) {
+	if mw.mainSplit == nil {
+		return
+	}
+	
+	if isCollapsed {
+		// 折叠：将偏移设置为接近 1.0，使日志区域几乎不可见
+		mw.mainSplit.Offset = 0.99
+	} else {
+		// 展开：恢复保存的分割位置
+		if mw.layoutConfig != nil && mw.layoutConfig.ServerListOffset > 0 {
+			mw.mainSplit.Offset = mw.layoutConfig.ServerListOffset
+		} else {
+			mw.mainSplit.Offset = 0.6667
+		}
+	}
+	
+	// 刷新分割容器
+	mw.mainSplit.Refresh()
+}
+
+// initPages 初始化单窗口的三个页面：home / node / settings
+func (mw *MainWindow) initPages() {
+	// 主界面（homePage）：极简状态 + 一键主开关
+	mw.homePage = mw.buildHomePage()
+
+	// 节点列表页面（nodePage）：顶部返回 + 标题，下方为服务器列表
+	mw.nodePage = mw.buildNodePage()
+
+	// 设置页面（settingsPage）：顶部返回 + 标题，下方预留设置内容
+	mw.settingsPage = mw.buildSettingsPage()
+}
+
+// buildHomePage 构建主界面 Container（homePage）
+func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
+	if mw.statusPanel == nil {
+		return container.NewWithoutLayout()
+	}
+
+	statusArea := mw.statusPanel.Build()
+	if statusArea == nil {
+		statusArea = container.NewWithoutLayout()
+	}
+
+	// 顶部标题栏：左侧应用名称，右侧为“节点”和“设置”入口
+	titleLabel := NewTitleLabel("SOCKS5 代理客户端")
+	headerButtons := container.NewHBox(
+		NewStyledButton("节点", theme.NavigateNextIcon(), func() {
+			mw.ShowNodePage()
+		}),
+		NewSpacer(SpacingSmall),
+		NewStyledButton("设置", theme.SettingsIcon(), func() {
+			mw.ShowSettingsPage()
+		}),
+	)
+	headerBar := container.NewPadded(container.NewHBox(
+		titleLabel,
+		layout.NewSpacer(),
+		headerButtons,
+	))
+
+	// 中部内容：状态面板（内部负责实现“一键主开关 + 状态 + 节点 + 模式 + 流量图占位”）
+	centerContent := container.NewCenter(statusArea)
+
+	return container.NewBorder(
+		headerBar,
+		nil,
+		nil,
+		nil,
+		centerContent,
+	)
+}
+
+// buildNodePage 构建节点列表页面 Container（nodePage）
+func (mw *MainWindow) buildNodePage() fyne.CanvasObject {
+	if mw.serverListPanel == nil {
+		return container.NewWithoutLayout()
+	}
+
+	// 顶部栏：返回主界面 + 标题
+	backBtn := NewStyledButton("← 返回", nil, func() {
+		mw.ShowHomePage()
+	})
+	titleLabel := NewTitleLabel("节点列表")
+	headerBar := container.NewPadded(container.NewHBox(
+		backBtn,
+		NewSpacer(SpacingLarge),
+		titleLabel,
+		layout.NewSpacer(),
+	))
+
+	listContent := mw.serverListPanel.Build()
+	if listContent == nil {
+		listContent = container.NewWithoutLayout()
+	}
+
+	return container.NewBorder(
+		headerBar,
+		nil,
+		nil,
+		nil,
+		listContent,
+	)
+}
+
+// buildSettingsPage 构建设置页面 Container（settingsPage）
+func (mw *MainWindow) buildSettingsPage() fyne.CanvasObject {
+	// 顶部栏：返回主界面 + 标题
+	backBtn := NewStyledButton("← 返回", nil, func() {
+		mw.ShowHomePage()
+	})
+	titleLabel := NewTitleLabel("设置")
+	headerBar := container.NewPadded(container.NewHBox(
+		backBtn,
+		NewSpacer(SpacingLarge),
+		titleLabel,
+		layout.NewSpacer(),
+	))
+
+	// 这里暂时使用占位内容，后续可以替换为真正的设置视图
+	placeholder := widget.NewLabel("设置界面开发中（Settings View Placeholder）")
+	center := container.NewCenter(placeholder)
+
+	return container.NewBorder(
+		headerBar,
+		nil,
+		nil,
+		nil,
+		center,
+	)
+}
+
+// ShowHomePage 切换到主界面（homePage）
+func (mw *MainWindow) ShowHomePage() {
+	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
+		return
+	}
+	if mw.homePage == nil {
+		mw.homePage = mw.buildHomePage()
+	}
+	mw.appState.Window.SetContent(mw.homePage)
+}
+
+// ShowNodePage 切换到节点列表页面（nodePage）
+func (mw *MainWindow) ShowNodePage() {
+	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
+		return
+	}
+	if mw.nodePage == nil {
+		mw.nodePage = mw.buildNodePage()
+	}
+	mw.appState.Window.SetContent(mw.nodePage)
+}
+
+// ShowSettingsPage 切换到设置页面（settingsPage）
+func (mw *MainWindow) ShowSettingsPage() {
+	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
+		return
+	}
+	if mw.settingsPage == nil {
+		mw.settingsPage = mw.buildSettingsPage()
+	}
+	mw.appState.Window.SetContent(mw.settingsPage)
 }

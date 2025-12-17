@@ -123,14 +123,16 @@ func (a *AppState) updateStatusBindings() {
 	}
 
 	if isRunning {
-		a.ProxyStatusBinding.Set("代理状态: 运行中")
+		// 与 UI 设计规范保持一致的文案：当前连接状态 + 已连接
+		a.ProxyStatusBinding.Set("当前连接状态: 🟢 已连接")
 		if proxyPort > 0 {
 			a.PortBinding.Set(fmt.Sprintf("监听端口: %d", proxyPort))
 		} else {
 			a.PortBinding.Set("监听端口: -")
 		}
 	} else {
-		a.ProxyStatusBinding.Set("代理状态: 未启动")
+		// 未连接状态文案
+		a.ProxyStatusBinding.Set("当前连接状态: ⚪ 未连接")
 		a.PortBinding.Set("监听端口: -")
 	}
 
@@ -177,7 +179,8 @@ func (a *AppState) InitApp() {
 	}
 	a.App.Settings().SetTheme(NewMonochromeTheme(themeVariant))
 	a.Window = a.App.NewWindow("SOCKS5 代理客户端")
-	a.Window.Resize(fyne.NewSize(900, 700))
+	// 主界面为极简状态视图，使用较小的默认窗口尺寸，更贴近 UI 设计草图
+	a.Window.Resize(fyne.NewSize(420, 520))
 
 	// Fyne 应用初始化后，可以初始化绑定数据
 	a.updateStatusBindings()

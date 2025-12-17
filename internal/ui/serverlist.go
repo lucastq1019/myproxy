@@ -3,10 +3,12 @@ package ui
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"myproxy.com/p/internal/config"
 	"myproxy.com/p/internal/database"
@@ -21,7 +23,11 @@ type ServerListPanel struct {
 	serverList         *widget.List
 	subscriptionSelect *widget.Select // 订阅选择下拉菜单
 	onServerSelect     func(server config.Server)
-	statusPanel        *StatusPanel // 状态面板引用（用于刷新）
+	statusPanel        *StatusPanel // 状态面板引用（用于刷新和一键操作）
+
+	// 搜索与过滤相关
+	searchEntry *widget.Entry // 节点搜索输入框
+	searchText  string        // 当前搜索关键字（小写）
 }
 
 // NewServerListPanel 创建并初始化服务器列表面板。
@@ -60,33 +66,90 @@ func (slp *ServerListPanel) SetOnServerSelect(callback func(server config.Server
 //   - statusPanel: 状态面板实例
 func (slp *ServerListPanel) SetStatusPanel(statusPanel *StatusPanel) {
 	slp.statusPanel = statusPanel
+	// 将一键操作主开关与现有启动/停止逻辑绑定
+	if slp.statusPanel != nil {
+		slp.statusPanel.SetToggleHandler(func() {
+			// 如果当前已有代理在运行，则走“停止”逻辑；否则启动当前选中服务器
+			if slp.appState != nil && slp.appState.XrayInstance != nil && slp.appState.XrayInstance.IsRunning() {
+				slp.StopProxy()
+			} else {
+				slp.StartProxyForSelected()
+			}
+		})
+	}
 }
 
 // Build 构建并返回服务器列表面板的 UI 组件。
 // 返回：包含操作按钮和服务器列表的容器组件
 func (slp *ServerListPanel) Build() fyne.CanvasObject {
-	// 操作按钮
-	testAllBtn := widget.NewButton("一键测延迟", slp.onTestAll)
-	startProxyBtn := widget.NewButton("启动代理", slp.onStartProxyFromSelected)
-	stopProxyBtn := widget.NewButton("停止代理", slp.onStopProxy)
+	// 操作按钮 - 添加图标
+	testAllBtn := NewStyledButton("🔃 一键测速", theme.ViewRefreshIcon(), slp.onTestAll)
+	startProxyBtn := NewStyledButton("启动代理", theme.ConfirmIcon(), slp.onStartProxyFromSelected)
+	stopProxyBtn := NewStyledButton("停止代理", theme.CancelIcon(), slp.onStopProxy)
 
-	// 订阅选择下拉菜单
-	slp.subscriptionSelect = widget.NewSelect([]string{"加载中..."}, nil)
+	// 全局搜索栏：支持按名称、地址、协议实时搜索
+	slp.searchEntry = widget.NewEntry()
+	slp.searchEntry.SetPlaceHolder("🔍 搜索节点（名称 / 地址 / 协议）")
+	slp.searchEntry.OnChanged = func(value string) {
+		// 记录小写关键字，便于不区分大小写匹配
+		slp.searchText = strings.ToLower(strings.TrimSpace(value))
+		slp.Refresh()
+	}
+
+	// 订阅选择下拉菜单 - 使用样式化的下拉框
+	slp.subscriptionSelect = NewStyledSelect([]string{"加载中..."}, nil)
 	slp.updateSubscriptionSelect(slp.subscriptionSelect)
 
-	// 服务器列表标题和按钮
-	headerArea := container.NewHBox(
-		widget.NewLabel("服务器列表"),
-		layout.NewSpacer(),
-		widget.NewLabel("订阅："),
-		slp.subscriptionSelect,
-		testAllBtn,
-		startProxyBtn,
-		stopProxyBtn,
+	// 服务器列表标题（使用标题样式）
+	titleLabel := NewTitleLabel("节点选择")
+
+	// 订阅标签（使用副标题样式）
+	subscriptionLabel := NewSubtitleLabel("订阅：")
+
+	// 服务器列表标题和按钮 - 优化布局和间距，贴近 UI 草图：
+	// 第一行：搜索栏 + 一键测速（核心高频操作）
+	// 第二行：订阅筛选 + 启动/停止代理按钮
+	headerArea := container.NewVBox(
+		// 第一行：搜索 + 一键测速
+		container.NewPadded(container.NewHBox(
+			slp.searchEntry,
+			NewSpacer(SpacingLarge),
+			testAllBtn,
+		)),
+		// 第二行：标题 + 订阅筛选 + 启停代理
+		container.NewPadded(container.NewHBox(
+			titleLabel,
+			NewSpacer(SpacingLarge),
+			subscriptionLabel,
+			slp.subscriptionSelect,
+			layout.NewSpacer(),
+			startProxyBtn,
+			NewSpacer(SpacingSmall),
+			stopProxyBtn,
+		)),
 	)
+
+	// 创建列标题行，与列表项对齐
+	columnHeaders := slp.createColumnHeaders()
+
+	// 分组标题：收藏与全部节点（当前仅展示分组标题，收藏功能可在未来扩展）
+	favoritesHeader := NewSubtitleLabel("⭐ 我的收藏 (Favorites)")
+	allNodesHeader := NewSubtitleLabel("🌍 所有节点 (All Nodes)")
 
 	// 服务器列表滚动区域（不再展示右侧详情）
 	serverScroll := container.NewScroll(slp.serverList)
+
+	// 列表上方插入分组标题（目前所有节点都显示在“所有节点”下方）
+	listWithGroups := container.NewVBox(
+		// TODO: 未来在这里插入真正的“收藏”节点列表
+		favoritesHeader,
+		NewSeparator(),
+		allNodesHeader,
+		NewSeparator(),
+		columnHeaders,
+		NewSeparator(),
+		serverScroll,
+	)
 
 	// 返回包含标题和列表的容器
 	return container.NewBorder(
@@ -94,8 +157,68 @@ func (slp *ServerListPanel) Build() fyne.CanvasObject {
 		nil,
 		nil,
 		nil,
-		serverScroll,
+		listWithGroups,
 	)
+}
+
+// createColumnHeaders 创建列标题行，与列表项对齐
+func (slp *ServerListPanel) createColumnHeaders() fyne.CanvasObject {
+	// 创建列标题标签：地区 / 节点名称 / 端口 / 延迟
+	regionHeader := NewSubtitleLabel("地区")
+	regionHeader.Alignment = fyne.TextAlignCenter
+
+	nameHeader := NewSubtitleLabel("节点名称")
+	nameHeader.Alignment = fyne.TextAlignLeading
+
+	portHeader := NewSubtitleLabel("端口")
+	portHeader.Alignment = fyne.TextAlignCenter
+
+	delayHeader := NewSubtitleLabel("延迟")
+	delayHeader.Alignment = fyne.TextAlignCenter
+
+	// 创建图标占位（与列表项对齐）
+	iconPlaceholder := widget.NewIcon(theme.ComputerIcon())
+
+	// 地区列容器
+	regionContainer := container.NewGridWrap(
+		fyne.NewSize(80, 28),
+		container.NewPadded(container.NewStack(regionHeader)),
+	)
+
+	// 名称列容器（包含图标）
+	nameContainer := container.NewGridWrap(
+		fyne.NewSize(220, 28),
+		container.NewHBox(
+			iconPlaceholder,
+			NewSpacer(SpacingSmall),
+			container.NewStack(nameHeader),
+		),
+	)
+
+	// 端口列容器
+	portContainer := container.NewGridWrap(
+		fyne.NewSize(80, 28),
+		container.NewPadded(container.NewStack(portHeader)),
+	)
+
+	// 延迟列容器
+	delayContainer := container.NewGridWrap(
+		fyne.NewSize(90, 28),
+		container.NewPadded(container.NewStack(delayHeader)),
+	)
+
+	// 使用网格布局组织各列容器，与列表项对齐
+	gridContainer := container.NewGridWithColumns(4,
+		regionContainer,
+		nameContainer,
+		portContainer,
+		delayContainer,
+	)
+
+	// 添加内边距，与列表项保持一致
+	headerContainer := container.NewPadded(gridContainer)
+
+	return headerContainer
 }
 
 // updateSubscriptionSelect 更新订阅选择下拉菜单
@@ -114,7 +237,7 @@ func (slp *ServerListPanel) updateSubscriptionSelect(selectWidget *widget.Select
 
 	// 添加所有订阅
 	for _, sub := range subscriptions {
-		option := fmt.Sprintf("%s", sub.Label)
+		option := sub.Label
 		options = append(options, option)
 		optionToID[option] = sub.ID
 	}
@@ -158,13 +281,46 @@ func (slp *ServerListPanel) updateSubscriptionSelect(selectWidget *widget.Select
 // Refresh 刷新服务器列表的显示，使 UI 反映最新的服务器数据。
 func (slp *ServerListPanel) Refresh() {
 	fyne.Do(func() {
-		slp.serverList.Refresh()
+		if slp.serverList != nil {
+			slp.serverList.Refresh()
+		}
 	})
 }
 
 // getServerCount 获取服务器数量
 func (slp *ServerListPanel) getServerCount() int {
-	return len(slp.appState.ServerManager.ListServers())
+	if slp.appState == nil || slp.appState.ServerManager == nil {
+		return 0
+	}
+	return len(slp.getFilteredServers())
+}
+
+// getFilteredServers 根据当前搜索关键字返回过滤后的服务器列表。
+// 支持按名称、地址、协议类型进行不区分大小写的匹配。
+func (slp *ServerListPanel) getFilteredServers() []config.Server {
+	if slp.appState == nil || slp.appState.ServerManager == nil {
+		return []config.Server{}
+	}
+
+	servers := slp.appState.ServerManager.ListServers()
+	// 如果没有搜索关键字，直接返回完整列表
+	if slp.searchText == "" {
+		return servers
+	}
+
+	filtered := make([]config.Server, 0, len(servers))
+	for _, s := range servers {
+		name := strings.ToLower(s.Name)
+		addr := strings.ToLower(s.Addr)
+		protocol := strings.ToLower(s.ProtocolType)
+
+		if strings.Contains(name, slp.searchText) ||
+			strings.Contains(addr, slp.searchText) ||
+			strings.Contains(protocol, slp.searchText) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
 }
 
 // createServerItem 创建服务器列表项
@@ -174,7 +330,7 @@ func (slp *ServerListPanel) createServerItem() fyne.CanvasObject {
 
 // updateServerItem 更新服务器列表项
 func (slp *ServerListPanel) updateServerItem(id widget.ListItemID, obj fyne.CanvasObject) {
-	servers := slp.appState.ServerManager.ListServers()
+	servers := slp.getFilteredServers()
 	if id < 0 || id >= len(servers) {
 		return
 	}
@@ -185,6 +341,8 @@ func (slp *ServerListPanel) updateServerItem(id widget.ListItemID, obj fyne.Canv
 	// 设置面板引用和ID
 	item.panel = slp
 	item.id = id
+	item.isEven = (id % 2) == 0 // 设置是否为偶数行
+	item.isSelected = srv.Selected // 设置是否选中
 
 	// 使用新的Update方法更新多列信息
 	item.Update(srv)
@@ -192,7 +350,7 @@ func (slp *ServerListPanel) updateServerItem(id widget.ListItemID, obj fyne.Canv
 
 // onSelected 服务器选中事件
 func (slp *ServerListPanel) onSelected(id widget.ListItemID) {
-	servers := slp.appState.ServerManager.ListServers()
+	servers := slp.getFilteredServers()
 	if id < 0 || id >= len(servers) {
 		return
 	}
@@ -213,7 +371,7 @@ func (slp *ServerListPanel) onSelected(id widget.ListItemID) {
 
 // onRightClick 右键菜单
 func (slp *ServerListPanel) onRightClick(id widget.ListItemID, ev *fyne.PointEvent) {
-	servers := slp.appState.ServerManager.ListServers()
+	servers := slp.getFilteredServers()
 	if id < 0 || id >= len(servers) {
 		return
 	}
@@ -241,7 +399,7 @@ func (slp *ServerListPanel) onRightClick(id widget.ListItemID, ev *fyne.PointEve
 
 // onTestSpeed 测速
 func (slp *ServerListPanel) onTestSpeed(id widget.ListItemID) {
-	servers := slp.appState.ServerManager.ListServers()
+	servers := slp.getFilteredServers()
 	if id < 0 || id >= len(servers) {
 		return
 	}
@@ -429,6 +587,12 @@ func (slp *ServerListPanel) startProxyWithServer(srv *config.Server) {
 	slp.saveConfigToDB()
 }
 
+// StartProxyForSelected 对外暴露的“启动当前选中服务器”接口，供主界面一键按钮等复用。
+// 内部直接复用现有 onStartProxyFromSelected 逻辑，避免重复实现。
+func (slp *ServerListPanel) StartProxyForSelected() {
+	slp.onStartProxyFromSelected()
+}
+
 // logAndShowError 记录日志并显示错误对话框（统一错误处理）
 func (slp *ServerListPanel) logAndShowError(message string, err error) {
 	if slp.appState != nil && slp.appState.Logger != nil {
@@ -501,6 +665,12 @@ func (slp *ServerListPanel) onStopProxy() {
 	}
 }
 
+// StopProxy 对外暴露的“停止代理”接口，供主界面一键按钮等复用。
+// 内部直接复用现有 onStopProxy 逻辑。
+func (slp *ServerListPanel) StopProxy() {
+	slp.onStopProxy()
+}
+
 // onTestAll 一键测延迟
 func (slp *ServerListPanel) onTestAll() {
 	// 在goroutine中执行测速
@@ -557,91 +727,90 @@ func (slp *ServerListPanel) onTestAll() {
 	}()
 }
 
-// getSelectedIndex 获取当前选中的索引
-func (slp *ServerListPanel) getSelectedIndex() widget.ListItemID {
-	servers := slp.appState.ServerManager.ListServers()
-	for i, srv := range servers {
-		if srv.ID == slp.appState.SelectedServerID {
-			return widget.ListItemID(i)
-		}
-	}
-	return -1
-}
-
 // ServerListItem 自定义服务器列表项（支持右键菜单和多列显示）
 type ServerListItem struct {
 	widget.BaseWidget
 	id          widget.ListItemID
 	panel       *ServerListPanel
 	container   *fyne.Container
+	bgContainer *fyne.Container // 背景容器
+	regionLabel *widget.Label
 	nameLabel   *widget.Label
-	addrLabel   *widget.Label
 	portLabel   *widget.Label
-	userLabel   *widget.Label
 	delayLabel  *widget.Label
-	statusLabel *widget.Label
+	isSelected  bool // 是否选中
+	isEven      bool // 是否为偶数行（用于交替颜色）
 }
 
 // NewServerListItem 创建新的服务器列表项
 func NewServerListItem() *ServerListItem {
-	// 创建各列标签
+	// 创建各列标签（地区 / 名称 / 端口 / 延迟）
+	regionLabel := widget.NewLabel("")
+	regionLabel.Wrapping = fyne.TextTruncate
+
 	nameLabel := widget.NewLabel("")
 	nameLabel.Wrapping = fyne.TextTruncate
 	nameLabel.TextStyle = fyne.TextStyle{Bold: true}
 
-	addrLabel := widget.NewLabel("")
-	addrLabel.Wrapping = fyne.TextTruncate
-
 	portLabel := widget.NewLabel("")
 	portLabel.Alignment = fyne.TextAlignCenter
-
-	userLabel := widget.NewLabel("")
-	userLabel.Wrapping = fyne.TextTruncate
 
 	delayLabel := widget.NewLabel("")
 	delayLabel.Alignment = fyne.TextAlignCenter
 
-	statusLabel := widget.NewLabel("")
-	statusLabel.Alignment = fyne.TextAlignCenter
+	// 创建图标（服务器图标）
+	serverIcon := widget.NewIcon(theme.ComputerIcon())
 
 	// 创建容器，使用网格布局，确保所有列都能显示
-	// 为每列添加一个包含标签的固定大小容器
-	nameContainer := container.NewMax(nameLabel)
-	nameContainer.Resize(fyne.NewSize(180, 40))
-
-	addrContainer := container.NewMax(addrLabel)
-	addrContainer.Resize(fyne.NewSize(120, 40))
-
-	portContainer := container.NewMax(portLabel)
-	portContainer.Resize(fyne.NewSize(60, 40))
-
-	userContainer := container.NewMax(userLabel)
-	userContainer.Resize(fyne.NewSize(100, 40))
-
-	delayContainer := container.NewMax(delayLabel)
-	delayContainer.Resize(fyne.NewSize(80, 40))
-
-	statusContainer := container.NewMax(statusLabel)
-	statusContainer.Resize(fyne.NewSize(80, 40))
-
-	// 使用网格布局组织各列容器
-	container := container.NewGridWithColumns(6,
-		nameContainer,
-		addrContainer,
-		portContainer,
-		userContainer,
-		delayContainer,
-		statusContainer,
+	// 为每列添加一个包含标签的固定大小容器，并添加内边距
+	// 使用 GridWrap 来控制宽度，而不是使用已废弃的 Resize
+	regionContainer := container.NewGridWrap(
+		fyne.NewSize(80, 32),
+		container.NewPadded(container.NewStack(regionLabel)),
 	)
 
+	nameContainer := container.NewGridWrap(
+		fyne.NewSize(220, 32), // 设置合理的宽度和高度
+		container.NewHBox(
+			serverIcon,
+			NewSpacer(SpacingSmall),
+			container.NewStack(nameLabel),
+		),
+	)
+
+	portContainer := container.NewGridWrap(
+		fyne.NewSize(80, 32),
+		container.NewPadded(container.NewStack(portLabel)),
+	)
+
+	delayContainer := container.NewGridWrap(
+		fyne.NewSize(90, 32),
+		container.NewPadded(container.NewStack(delayLabel)),
+	)
+
+	// 使用网格布局组织各列容器
+	gridContainer := container.NewGridWithColumns(4,
+		regionContainer,
+		nameContainer,
+		portContainer,
+		delayContainer,
+	)
+	// 添加整体内边距，使列表项更美观
+	contentContainer := container.NewPadded(gridContainer)
+
+	// 创建带背景的容器（用于交替颜色和选中效果）
+	bgContainer := container.NewWithoutLayout()
+	bgContainer.Add(contentContainer)
+
 	item := &ServerListItem{
-		container:   container,
+		container:   contentContainer,
+		bgContainer: bgContainer,
+		regionLabel: regionLabel,
 		nameLabel:   nameLabel,
-		addrLabel:   addrLabel,
 		portLabel:   portLabel,
-		userLabel:   userLabel,
 		delayLabel:  delayLabel,
-		statusLabel: statusLabel,
+		isSelected:  false,
+		isEven:      false,
 	}
 	item.ExtendBaseWidget(item)
 	return item
@@ -649,7 +818,7 @@ func NewServerListItem() *ServerListItem {
 
 // CreateRenderer 创建渲染器
 func (s *ServerListItem) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(s.container)
+	return widget.NewSimpleRenderer(s.bgContainer)
 }
 
 // TappedSecondary 处理右键点击事件
@@ -663,43 +832,64 @@ func (s *ServerListItem) TappedSecondary(pe *fyne.PointEvent) {
 // Update  更新服务器列表项的信息
 func (s *ServerListItem) Update(server config.Server) {
 	fyne.Do(func() {
-		// 服务器名称（带选中标记）
+		// 更新选中状态
+		s.isSelected = server.Selected
+
+		// 地区：从名称中尝试提取前缀（例如 "US - LA" -> "US"）
+		region := "-"
+		if server.Name != "" {
+			nameLower := strings.TrimSpace(server.Name)
+			// 使用 "-" 或 空格 作为简单分隔符
+			if idx := strings.Index(nameLower, "-"); idx > 0 {
+				region = strings.TrimSpace(nameLower[:idx])
+			} else if idx := strings.Index(nameLower, " "); idx > 0 {
+				region = strings.TrimSpace(nameLower[:idx])
+			}
+		}
+		s.regionLabel.SetText(region)
+
+		// 服务器名称（带选中标记和图标）
 		prefix := ""
 		if server.Selected {
 			prefix = "★ "
+			s.nameLabel.TextStyle = fyne.TextStyle{Bold: true}
+		} else {
+			s.nameLabel.TextStyle = fyne.TextStyle{Bold: false}
 		}
 		if !server.Enabled {
 			prefix += "[禁用] "
+			s.nameLabel.Importance = widget.LowImportance
+		} else {
+			s.nameLabel.Importance = widget.MediumImportance
 		}
 		s.nameLabel.SetText(prefix + server.Name)
 
-		// 服务器地址
-		s.addrLabel.SetText(server.Addr)
-
 		// 端口
 		s.portLabel.SetText(strconv.Itoa(server.Port))
-
-		// 用户名
-		username := server.Username
-		if username == "" {
-			username = "无"
+		if !server.Enabled {
+			s.portLabel.Importance = widget.LowImportance
+		} else {
+			s.portLabel.Importance = widget.MediumImportance
 		}
-		s.userLabel.SetText(username)
 
-		// 延迟
+		// 延迟 - 根据延迟值设置重要性（颜色）
 		delayText := "未测"
 		if server.Delay > 0 {
 			delayText = fmt.Sprintf("%d ms", server.Delay)
+			// 延迟越低，重要性越高（颜色更明显）
+			if server.Delay < 100 {
+				s.delayLabel.Importance = widget.HighImportance
+			} else if server.Delay < 300 {
+				s.delayLabel.Importance = widget.MediumImportance
+			} else {
+				s.delayLabel.Importance = widget.LowImportance
+			}
 		} else if server.Delay < 0 {
 			delayText = "失败"
+			s.delayLabel.Importance = widget.DangerImportance
+		} else {
+			s.delayLabel.Importance = widget.LowImportance
 		}
 		s.delayLabel.SetText(delayText)
-
-		// 状态
-		status := "启用"
-		if !server.Enabled {
-			status = "禁用"
-		}
-		s.statusLabel.SetText(status)
 	})
 }

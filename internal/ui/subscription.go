@@ -8,6 +8,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"myproxy.com/p/internal/database"
 )
@@ -52,21 +54,33 @@ func (sp *SubscriptionPanel) Build() fyne.CanvasObject {
 	// 从绑定数据初始化标签显示
 	sp.updateTagsFromBinding()
 
-	// 加号按钮
-	addBtn := widget.NewButton("+", sp.onAddSubscription)
-	updateBtn := widget.NewButton("更新订阅", sp.onUpdateSubscription)
+	// 按钮 - 添加图标
+	addBtn := NewStyledButton("添加", theme.ContentAddIcon(), sp.onAddSubscription)
+	updateBtn := NewStyledButton("更新订阅", theme.ViewRefreshIcon(), sp.onUpdateSubscription)
 
-	// 订阅管理标题和标签组
+	// 订阅管理标题（使用标题样式）
+	titleLabel := NewTitleLabel("订阅管理")
+
+	// 订阅管理标题和标签组 - 优化布局和间距
+	// 将标签容器放在一个带背景的容器中，使其更美观
+	tagScroll := container.NewScroll(sp.tagContainer)
+	tagScroll.SetMinSize(fyne.NewSize(300, 0)) // 设置最小宽度
+	
 	sp.headerArea = container.NewHBox(
-		widget.NewLabel("订阅管理"),
-		sp.tagContainer,
+		titleLabel,
+		NewSpacer(SpacingLarge),
+		tagScroll, // 使用滚动容器包装标签
+		layout.NewSpacer(),
 		addBtn,
+		NewSpacer(SpacingSmall),
 		updateBtn,
 	)
+	// 添加内边距
+	sp.headerArea = container.NewPadded(sp.headerArea)
 
 	return container.NewVBox(
 		sp.headerArea,
-		widget.NewSeparator(),
+		NewSeparator(),
 	)
 }
 
@@ -100,12 +114,22 @@ func (sp *SubscriptionPanel) updateTagsFromBinding() {
 
 		if sub != nil {
 			// 创建标签按钮，点击时弹出编辑对话框
+			// 使用带样式的按钮，标签按钮使用特殊样式
 			tagBtn := widget.NewButton(label, func(s *database.Subscription) func() {
 				return func() {
 					sp.onEditSubscription(s)
 				}
 			}(sub))
+			// 标签按钮使用中等重要性，使其更突出
+			tagBtn.Importance = widget.MediumImportance
+			// 优化标签按钮样式，使其更像标签/徽章
+			// 添加图标使标签更美观
+			tagBtn.SetIcon(theme.FolderIcon())
 			tagButtons = append(tagButtons, tagBtn)
+			// 添加小间距
+			if len(tagButtons) > 1 {
+				tagButtons = append(tagButtons, NewSpacer(SpacingSmall))
+			}
 		}
 	}
 
@@ -117,24 +141,16 @@ func (sp *SubscriptionPanel) updateTagsFromBinding() {
 	// 这里我们只是更新 tagContainer，主窗口会在需要时刷新
 }
 
-// refreshTags 刷新标签显示（保留用于兼容性，现在使用绑定）
-func (sp *SubscriptionPanel) refreshTags() {
-	// 更新绑定数据，UI 会自动更新
-	if sp.appState != nil {
-		sp.appState.UpdateSubscriptionLabels()
-	}
-}
-
 // onEditSubscription 编辑订阅（弹出对话框）
 func (sp *SubscriptionPanel) onEditSubscription(sub *database.Subscription) {
-	// 创建对话框内容
+	// 创建对话框内容 - 优化输入框样式
 	urlEntry := widget.NewEntry()
 	urlEntry.SetText(sub.URL)
-	urlEntry.SetPlaceHolder("请输入订阅URL（必填）")
+	urlEntry.SetPlaceHolder("例如: https://example.com/subscribe")
 
 	labelEntry := widget.NewEntry()
 	labelEntry.SetText(sub.Label)
-	labelEntry.SetPlaceHolder("请输入标签（必填）")
+	labelEntry.SetPlaceHolder("例如: 我的订阅")
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -190,12 +206,12 @@ func (sp *SubscriptionPanel) onEditSubscription(sub *database.Subscription) {
 
 // onAddSubscription 添加订阅（弹出对话框）
 func (sp *SubscriptionPanel) onAddSubscription() {
-	// 创建对话框内容
+	// 创建对话框内容 - 优化输入框样式
 	urlEntry := widget.NewEntry()
-	urlEntry.SetPlaceHolder("请输入订阅URL（必填）")
+	urlEntry.SetPlaceHolder("例如: https://example.com/subscribe")
 
 	labelEntry := widget.NewEntry()
-	labelEntry.SetPlaceHolder("请输入标签（必填）")
+	labelEntry.SetPlaceHolder("例如: 我的订阅")
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{

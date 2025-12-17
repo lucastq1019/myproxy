@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/logging"
@@ -32,8 +33,17 @@ type StatusPanel struct {
 	proxyStatusLabel *widget.Label
 	portLabel        *widget.Label
 	serverNameLabel  *widget.Label
+	delayLabel       *widget.Label
 	proxyModeSelect  *widget.Select
 	systemProxy      *systemproxy.SystemProxy
+	statusIcon       *widget.Icon // 状态图标
+	portIcon         *widget.Icon // 端口图标
+	serverIcon       *widget.Icon // 服务器图标
+	proxyIcon        *widget.Icon // 代理图标
+
+	// 主界面一键操作大按钮相关
+	mainToggleButton *widget.Button      // 主开关按钮（连接/断开）
+	onToggleProxy    func()              // 由外部注入的代理开关回调
 }
 
 // NewStatusPanel 创建并初始化状态信息面板。
@@ -53,6 +63,7 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 		sp.proxyStatusLabel = widget.NewLabel("代理状态: 未知")
 		sp.portLabel = widget.NewLabel("动态端口: -")
 		sp.serverNameLabel = widget.NewLabel("当前服务器: 无")
+		sp.delayLabel = widget.NewLabel("延迟: -")
 		return sp
 	}
 
@@ -81,8 +92,28 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 	}
 	sp.serverNameLabel.Wrapping = fyne.TextWrapOff
 
+	// 当前延迟标签（非绑定，使用 Refresh 时从 ServerManager 读取）
+	sp.delayLabel = widget.NewLabel("延迟: -")
+	sp.delayLabel.Wrapping = fyne.TextWrapOff
+
 	// 创建系统代理管理器（默认使用 localhost:10080）
 	sp.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10080)
+
+	// 创建图标
+	sp.statusIcon = widget.NewIcon(theme.CancelIcon())
+	sp.portIcon = widget.NewIcon(theme.InfoIcon())
+	sp.serverIcon = widget.NewIcon(theme.ComputerIcon())
+	sp.proxyIcon = widget.NewIcon(theme.SettingsIcon())
+
+	// 创建主开关按钮（大按钮），具体文本在 Build/Refresh 中根据状态更新
+	sp.mainToggleButton = widget.NewButton("主开关 (未连接)", func() {
+		// 交由外部注入的回调处理实际的启动/停止逻辑
+		if sp.onToggleProxy != nil {
+			sp.onToggleProxy()
+		}
+	})
+	// 使用较高的重要性，让按钮在主题下更突出
+	sp.mainToggleButton.Importance = widget.HighImportance
 
 	// 创建系统代理设置下拉框（只读，用于显示当前状态，不绑定 change 事件）
 	// 选项使用简短文本显示，但在内部映射到完整功能
@@ -105,31 +136,75 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 // Build 构建并返回状态信息面板的 UI 组件。
 // 返回：包含代理状态、端口和服务器名称的水平布局容器
 func (sp *StatusPanel) Build() fyne.CanvasObject {
-	// 使用水平布局显示所有信息，所有元素横向排列
-	// 使用 HBox 布局，元素从左到右排列，保持最小尺寸
-	// 添加 Spacer 将下拉框推到最右边
-	statusArea := container.NewHBox(
+	// 更新状态图标
+	sp.updateStatusIcon()
+	// 更新主按钮和延迟标签内容
+	sp.updateMainToggleButton()
+	sp.updateDelayLabel()
+
+	// 顶部：当前连接状态（简洁文案）
+	statusHeader := container.NewCenter(container.NewHBox(
+		sp.statusIcon,
+		NewSpacer(SpacingSmall),
 		sp.proxyStatusLabel,
-		widget.NewSeparator(), // 分隔符
-		sp.portLabel,
-		widget.NewSeparator(), // 分隔符
+	))
+
+	// 中部：巨大的主开关按钮（居中）
+	mainControlArea := container.NewCenter(sp.mainToggleButton)
+
+	// 下方：当前节点 + 模式 + 延迟（单行简洁信息）
+	nodeAndMode := container.NewHBox(
+		sp.serverIcon,
+		NewSpacer(SpacingSmall),
 		sp.serverNameLabel,
-		layout.NewSpacer(),    // Spacer，将下拉框推到最右边
-		widget.NewSeparator(), // 分隔符
-		sp.proxyModeSelect,    // 系统代理设置下拉框（最右边）
+		NewSpacer(SpacingMedium),
+		widget.NewLabel("模式:"),
+		NewSpacer(SpacingSmall),
+		sp.proxyModeSelect,
+		NewSpacer(SpacingMedium),
+		sp.delayLabel,
+		layout.NewSpacer(),
+	)
+	nodeAndMode = container.NewPadded(nodeAndMode)
+
+	// 底部：实时流量占位（未来可替换为小曲线图）
+	trafficPlaceholder := widget.NewLabel("实时流量图（预留）")
+	trafficArea := container.NewCenter(trafficPlaceholder)
+
+	// 整体垂直排版，类似 UI.md 草图
+	content := container.NewVBox(
+		container.NewPadded(statusHeader),
+		container.NewPadded(mainControlArea),
+		nodeAndMode,
+		container.NewPadded(trafficArea),
 	)
 
-	// 使用 Border 布局，顶部添加分隔线，确保区域可见
-	// Border 布局：top=分隔线，center=状态信息内容（水平布局）
-	result := container.NewBorder(
-		widget.NewSeparator(), // 顶部：分隔线
-		nil,                   // 底部：无
-		nil,                   // 左侧：无
-		nil,                   // 右侧：无
-		statusArea,            // 中间：状态信息内容（HBox 水平布局）
+	// 让内容在窗口中垂直居中一些，不要顶到上边缘
+	return container.NewBorder(
+		NewSpacer(SpacingLarge), // 顶部预留少量空白
+		NewSpacer(SpacingLarge), // 底部预留少量空白
+		nil,
+		nil,
+		container.NewCenter(content),
 	)
+}
 
-	return result
+// updateStatusIcon 更新状态图标
+func (sp *StatusPanel) updateStatusIcon() {
+	if sp.statusIcon == nil {
+		return
+	}
+	
+	isRunning := false
+	if sp.appState != nil && sp.appState.XrayInstance != nil {
+		isRunning = sp.appState.XrayInstance.IsRunning()
+	}
+	
+	if isRunning {
+		sp.statusIcon.SetResource(theme.ConfirmIcon())
+	} else {
+		sp.statusIcon.SetResource(theme.CancelIcon())
+	}
 }
 
 // Refresh 刷新状态信息显示。
@@ -140,6 +215,10 @@ func (sp *StatusPanel) Refresh() {
 	if sp.appState != nil {
 		sp.appState.UpdateProxyStatus()
 	}
+	// 更新状态图标、延迟标签和主按钮
+	sp.updateStatusIcon()
+	sp.updateDelayLabel()
+	sp.updateMainToggleButton()
 	// 更新系统代理管理器的端口
 	sp.updateSystemProxyPort()
 }
@@ -162,6 +241,54 @@ func (sp *StatusPanel) updateSystemProxyPort() {
 
 	// 更新系统代理管理器
 	sp.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", proxyPort)
+}
+
+// updateDelayLabel 根据当前选中服务器更新延迟显示
+func (sp *StatusPanel) updateDelayLabel() {
+	if sp.delayLabel == nil || sp.appState == nil || sp.appState.ServerManager == nil {
+		return
+	}
+
+	delayText := "延迟: -"
+	if sp.appState.SelectedServerID != "" {
+		if srv, err := sp.appState.ServerManager.GetServer(sp.appState.SelectedServerID); err == nil && srv != nil {
+			if srv.Delay > 0 {
+				delayText = fmt.Sprintf("延迟: %d ms", srv.Delay)
+			} else if srv.Delay < 0 {
+				delayText = "延迟: 测试失败"
+			} else {
+				delayText = "延迟: 未测"
+			}
+		}
+	}
+	sp.delayLabel.SetText(delayText)
+}
+
+// updateMainToggleButton 根据代理运行状态更新主开关按钮的文案
+// 这里只负责 UI 文案，真正的启动/停止逻辑由 onToggleProxy 回调处理
+func (sp *StatusPanel) updateMainToggleButton() {
+	if sp.mainToggleButton == nil {
+		return
+	}
+
+	isRunning := false
+	if sp.appState != nil && sp.appState.XrayInstance != nil {
+		isRunning = sp.appState.XrayInstance.IsRunning()
+	}
+
+	if isRunning {
+		sp.mainToggleButton.SetText("● 已连接（点击断开）")
+		sp.mainToggleButton.Importance = widget.HighImportance
+	} else {
+		sp.mainToggleButton.SetText("○ 未连接（点击连接）")
+		sp.mainToggleButton.Importance = widget.MediumImportance
+	}
+}
+
+// SetToggleHandler 设置主界面一键操作按钮的回调，由外部（如 MainWindow）注入。
+// 回调内部可以根据当前状态决定是启动还是停止代理。
+func (sp *StatusPanel) SetToggleHandler(handler func()) {
+	sp.onToggleProxy = handler
 }
 
 // getFullModeName 将简短文本映射到完整的功能名称
