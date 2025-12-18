@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -136,16 +137,17 @@ func (a *AppState) updateStatusBindings() {
 		a.PortBinding.Set("监听端口: -")
 	}
 
-	// 更新当前服务器
+	// 更新当前服务器（符合 UI.md 设计：🌐 节点: US - LA - 32ms）
 	if a.ServerManager != nil && a.SelectedServerID != "" {
 		server, err := a.ServerManager.GetServer(a.SelectedServerID)
 		if err == nil && server != nil {
-			a.ServerNameBinding.Set(fmt.Sprintf("当前服务器: %s (%s:%d)", server.Name, server.Addr, server.Port))
+			// 使用节点名称，格式更简洁
+			a.ServerNameBinding.Set(fmt.Sprintf("🌐 节点: %s", server.Name))
 		} else {
-			a.ServerNameBinding.Set("当前服务器: 未知")
+			a.ServerNameBinding.Set("🌐 节点: 未知")
 		}
 	} else {
-		a.ServerNameBinding.Set("当前服务器: 无")
+		a.ServerNameBinding.Set("🌐 节点: 无")
 	}
 }
 
@@ -179,8 +181,10 @@ func (a *AppState) InitApp() {
 	}
 	a.App.Settings().SetTheme(NewMonochromeTheme(themeVariant))
 	a.Window = a.App.NewWindow("SOCKS5 代理客户端")
-	// 主界面为极简状态视图，使用较小的默认窗口尺寸，更贴近 UI 设计草图
-	a.Window.Resize(fyne.NewSize(420, 520))
+	// 从数据库读取窗口大小，如果没有则使用默认值
+	defaultSize := fyne.NewSize(420, 520)
+	windowSize := LoadWindowSize(defaultSize)
+	a.Window.Resize(windowSize)
 
 	// Fyne 应用初始化后，可以初始化绑定数据
 	a.updateStatusBindings()
@@ -237,5 +241,43 @@ func (a *AppState) AppendLog(level, logType, message string) {
 	}
 	if a.LogsPanel != nil {
 		a.LogsPanel.AppendLog(level, logType, message)
+	}
+}
+
+// LoadWindowSize 从数据库加载窗口大小，如果不存在则返回默认值
+// 参数：
+//   - defaultSize: 默认窗口大小
+// 返回：窗口大小
+func LoadWindowSize(defaultSize fyne.Size) fyne.Size {
+	sizeStr, err := database.GetAppConfig("windowSize")
+	if err != nil || sizeStr == "" {
+		return defaultSize
+	}
+	
+	// 解析格式：width,height
+	parts := strings.Split(sizeStr, ",")
+	if len(parts) != 2 {
+		return defaultSize
+	}
+	
+	width, err1 := strconv.ParseFloat(parts[0], 32)
+	height, err2 := strconv.ParseFloat(parts[1], 32)
+	if err1 != nil || err2 != nil {
+		return defaultSize
+	}
+
+	fmt.Println("窗口大小: ", width, height)
+	fmt.Println("默认窗口大小: ", defaultSize.Width, defaultSize.Height)
+	return fyne.NewSize(float32(width), float32(height))
+}
+
+// SaveWindowSize 保存窗口大小到数据库
+// 参数：
+//   - size: 窗口大小
+func SaveWindowSize(size fyne.Size) {
+	sizeStr := fmt.Sprintf("%.0f,%.0f", float64(size.Width), float64(size.Height))
+	if err := database.SetAppConfig("windowSize", sizeStr); err != nil {
+		// 静默失败，不影响用户体验
+		_ = err
 	}
 }

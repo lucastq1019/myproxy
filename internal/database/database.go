@@ -344,6 +344,61 @@ func GetAllSubscriptions() ([]*Subscription, error) {
 	return subscriptions, nil
 }
 
+// DeleteSubscription 删除订阅及其关联的所有服务器。
+// 参数：
+//   - subscriptionID: 订阅 ID
+//
+// 返回：错误（如果有）
+func DeleteSubscription(subscriptionID int64) error {
+	// 先删除关联的服务器
+	if err := DeleteServersBySubscriptionID(subscriptionID); err != nil {
+		return fmt.Errorf("删除订阅关联服务器失败: %w", err)
+	}
+	
+	// 再删除订阅本身
+	_, err := DB.Exec("DELETE FROM subscriptions WHERE id = ?", subscriptionID)
+	if err != nil {
+		return fmt.Errorf("删除订阅失败: %w", err)
+	}
+	return nil
+}
+
+// GetSubscriptionByID 根据 ID 获取订阅。
+// 参数：
+//   - id: 订阅 ID
+//
+// 返回：订阅实例和错误（如果未找到或发生错误）
+func GetSubscriptionByID(id int64) (*Subscription, error) {
+	var sub Subscription
+	err := DB.QueryRow(
+		"SELECT id, url, label, created_at, updated_at FROM subscriptions WHERE id = ?",
+		id,
+	).Scan(&sub.ID, &sub.URL, &sub.Label, &sub.CreatedAt, &sub.UpdatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("查询订阅失败: %w", err)
+	}
+
+	return &sub, nil
+}
+
+// GetServerCountBySubscriptionID 获取指定订阅的服务器数量。
+// 参数：
+//   - subscriptionID: 订阅 ID
+//
+// 返回：服务器数量和错误（如果有）
+func GetServerCountBySubscriptionID(subscriptionID int64) (int, error) {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM servers WHERE subscription_id = ?", subscriptionID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("查询服务器数量失败: %w", err)
+	}
+	return count, nil
+}
+
 // AddOrUpdateServer 添加新服务器或更新现有服务器。
 // 如果服务器 ID 已存在，则更新其信息；否则创建新服务器。
 // 如果 subscriptionID 为 nil 且服务器已存在，则保持原有的 subscription_id。

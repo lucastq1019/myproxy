@@ -41,9 +41,11 @@ type MainWindow struct {
 	layoutConfig      *LayoutConfig    // 布局配置
 
 	// 单窗口多页面：通过 SetContent() 在一个窗口内切换不同的 Container
-	homePage     fyne.CanvasObject // 主界面（极简一键开关）
-	nodePage     fyne.CanvasObject // 节点列表页面
-	settingsPage fyne.CanvasObject // 设置页面
+	homePage         fyne.CanvasObject // 主界面（极简一键开关）
+	nodePage         fyne.CanvasObject // 节点列表页面
+	settingsPage     fyne.CanvasObject // 设置页面
+	subscriptionPage fyne.CanvasObject // 订阅管理页面
+	subscriptionPageInstance *SubscriptionPage // 订阅管理页面实例
 }
 
 // NewMainWindow 创建并初始化主窗口。
@@ -188,7 +190,7 @@ func (mw *MainWindow) UpdateLogsCollapseState(isCollapsed bool) {
 	mw.mainSplit.Refresh()
 }
 
-// initPages 初始化单窗口的三个页面：home / node / settings
+// initPages 初始化单窗口的四个页面：home / node / settings / subscription
 func (mw *MainWindow) initPages() {
 	// 主界面（homePage）：极简状态 + 一键主开关
 	mw.homePage = mw.buildHomePage()
@@ -198,6 +200,10 @@ func (mw *MainWindow) initPages() {
 
 	// 设置页面（settingsPage）：顶部返回 + 标题，下方预留设置内容
 	mw.settingsPage = mw.buildSettingsPage()
+
+	// 订阅管理页面（subscriptionPage）：订阅列表和管理功能
+	mw.subscriptionPageInstance = NewSubscriptionPage(mw.appState)
+	mw.subscriptionPage = mw.subscriptionPageInstance.Build()
 }
 
 // buildHomePage 构建主界面 Container（homePage）
@@ -212,21 +218,14 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	}
 
 	// 顶部标题栏：左侧应用名称，右侧为“节点”和“设置”入口
-	titleLabel := NewTitleLabel("SOCKS5 代理客户端")
+	// 顶部标题栏：右侧仅保留设置入口（符合 UI.md 设计：设置入口据右侧）
 	headerButtons := container.NewHBox(
-		NewStyledButton("节点", theme.NavigateNextIcon(), func() {
-			mw.ShowNodePage()
-		}),
-		NewSpacer(SpacingSmall),
+		layout.NewSpacer(),
 		NewStyledButton("设置", theme.SettingsIcon(), func() {
 			mw.ShowSettingsPage()
 		}),
 	)
-	headerBar := container.NewPadded(container.NewHBox(
-		titleLabel,
-		layout.NewSpacer(),
-		headerButtons,
-	))
+	headerBar := container.NewPadded(headerButtons)
 
 	// 中部内容：状态面板（内部负责实现“一键主开关 + 状态 + 节点 + 模式 + 流量图占位”）
 	centerContent := container.NewCenter(statusArea)
@@ -241,35 +240,19 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 }
 
 // buildNodePage 构建节点列表页面 Container（nodePage）
+// 返回按钮统一在 serverlist.go 中管理
 func (mw *MainWindow) buildNodePage() fyne.CanvasObject {
 	if mw.serverListPanel == nil {
 		return container.NewWithoutLayout()
 	}
-
-	// 顶部栏：返回主界面 + 标题
-	backBtn := NewStyledButton("← 返回", nil, func() {
-		mw.ShowHomePage()
-	})
-	titleLabel := NewTitleLabel("节点列表")
-	headerBar := container.NewPadded(container.NewHBox(
-		backBtn,
-		NewSpacer(SpacingLarge),
-		titleLabel,
-		layout.NewSpacer(),
-	))
 
 	listContent := mw.serverListPanel.Build()
 	if listContent == nil {
 		listContent = container.NewWithoutLayout()
 	}
 
-	return container.NewBorder(
-		headerBar,
-		nil,
-		nil,
-		nil,
-		listContent,
-	)
+	// 直接返回列表内容，返回按钮已在 ServerListPanel.Build() 中包含
+	return listContent
 }
 
 // buildSettingsPage 构建设置页面 Container（settingsPage）
@@ -307,7 +290,14 @@ func (mw *MainWindow) ShowHomePage() {
 	if mw.homePage == nil {
 		mw.homePage = mw.buildHomePage()
 	}
+	// 先设置内容
 	mw.appState.Window.SetContent(mw.homePage)
+	// 从数据库读取窗口大小并应用（在SetContent之后，避免内容的最小尺寸要求导致窗口变大）
+	defaultSize := fyne.NewSize(420, 520)
+	windowSize := LoadWindowSize(defaultSize)
+	mw.appState.Window.Resize(windowSize)
+	// 保存当前窗口大小到数据库（确保保存的是设置后的尺寸）
+	SaveWindowSize(windowSize)
 }
 
 // ShowNodePage 切换到节点列表页面（nodePage）
@@ -318,7 +308,14 @@ func (mw *MainWindow) ShowNodePage() {
 	if mw.nodePage == nil {
 		mw.nodePage = mw.buildNodePage()
 	}
+	// 先设置内容
 	mw.appState.Window.SetContent(mw.nodePage)
+	// 从数据库读取窗口大小并应用（在SetContent之后，避免内容的最小尺寸要求导致窗口变大）
+	defaultSize := fyne.NewSize(420, 520)
+	windowSize := LoadWindowSize(defaultSize)
+	mw.appState.Window.Resize(windowSize)
+	// 保存当前窗口大小到数据库（确保保存的是设置后的尺寸）
+	SaveWindowSize(windowSize)
 }
 
 // ShowSettingsPage 切换到设置页面（settingsPage）
@@ -329,5 +326,35 @@ func (mw *MainWindow) ShowSettingsPage() {
 	if mw.settingsPage == nil {
 		mw.settingsPage = mw.buildSettingsPage()
 	}
+	// 先设置内容
 	mw.appState.Window.SetContent(mw.settingsPage)
+	// 从数据库读取窗口大小并应用（在SetContent之后，避免内容的最小尺寸要求导致窗口变大）
+	defaultSize := fyne.NewSize(420, 520)
+	windowSize := LoadWindowSize(defaultSize)
+	mw.appState.Window.Resize(windowSize)
+	// 保存当前窗口大小到数据库（确保保存的是设置后的尺寸）
+	SaveWindowSize(windowSize)
+}
+
+// ShowSubscriptionPage 切换到订阅管理页面（subscriptionPage）
+func (mw *MainWindow) ShowSubscriptionPage() {
+	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
+		return
+	}
+	if mw.subscriptionPage == nil {
+		mw.subscriptionPageInstance = NewSubscriptionPage(mw.appState)
+		mw.subscriptionPage = mw.subscriptionPageInstance.Build()
+	}
+	// 刷新订阅列表
+	if mw.subscriptionPageInstance != nil {
+		mw.subscriptionPageInstance.Refresh()
+	}
+	// 先设置内容
+	mw.appState.Window.SetContent(mw.subscriptionPage)
+	// 从数据库读取窗口大小并应用（在SetContent之后，避免内容的最小尺寸要求导致窗口变大）
+	defaultSize := fyne.NewSize(420, 520)
+	windowSize := LoadWindowSize(defaultSize)
+	mw.appState.Window.Resize(windowSize)
+	// 保存当前窗口大小到数据库（确保保存的是设置后的尺寸）
+	SaveWindowSize(windowSize)
 }

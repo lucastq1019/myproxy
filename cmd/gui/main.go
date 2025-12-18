@@ -81,6 +81,10 @@ func main() {
 
 	// 设置窗口关闭事件，隐藏到托盘而不是退出
 	appState.Window.SetCloseIntercept(func() {
+		// 保存窗口大小到数据库
+		if appState.Window != nil && appState.Window.Canvas() != nil {
+			ui.SaveWindowSize(appState.Window.Canvas().Size())
+		}
 		// 保存布局配置到数据库
 		mainWindow.SaveLayoutConfig()
 		// 保存应用配置到数据库

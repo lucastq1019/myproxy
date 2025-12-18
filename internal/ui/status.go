@@ -5,7 +5,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"myproxy.com/p/internal/database"
@@ -93,7 +92,7 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 	sp.serverNameLabel.Wrapping = fyne.TextWrapOff
 
 	// 当前延迟标签（非绑定，使用 Refresh 时从 ServerManager 读取）
-	sp.delayLabel = widget.NewLabel("延迟: -")
+	sp.delayLabel = widget.NewLabel("-")
 	sp.delayLabel.Wrapping = fyne.TextWrapOff
 
 	// 创建系统代理管理器（默认使用 localhost:10080）
@@ -106,7 +105,7 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 	sp.proxyIcon = widget.NewIcon(theme.SettingsIcon())
 
 	// 创建主开关按钮（大按钮），具体文本在 Build/Refresh 中根据状态更新
-	sp.mainToggleButton = widget.NewButton("主开关 (未连接)", func() {
+	sp.mainToggleButton = widget.NewButton("", func() {
 		// 交由外部注入的回调处理实际的启动/停止逻辑
 		if sp.onToggleProxy != nil {
 			sp.onToggleProxy()
@@ -114,6 +113,8 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 	})
 	// 使用较高的重要性，让按钮在主题下更突出
 	sp.mainToggleButton.Importance = widget.HighImportance
+	// 设置按钮大小，使其更大更突出（圆形按钮效果）
+	sp.mainToggleButton.Resize(fyne.NewSize(120, 120))
 
 	// 创建系统代理设置下拉框（只读，用于显示当前状态，不绑定 change 事件）
 	// 选项使用简短文本显示，但在内部映射到完整功能
@@ -125,7 +126,7 @@ func NewStatusPanel(appState *AppState) *StatusPanel {
 		},
 		nil, // 不绑定 change 事件，只在启动时恢复状态
 	)
-	sp.proxyModeSelect.PlaceHolder = "系统代理设置"
+	sp.proxyModeSelect.PlaceHolder = "智能模式"
 
 	// 恢复系统代理状态（在应用启动时）
 	sp.restoreSystemProxyState()
@@ -142,41 +143,70 @@ func (sp *StatusPanel) Build() fyne.CanvasObject {
 	sp.updateMainToggleButton()
 	sp.updateDelayLabel()
 
-	// 顶部：当前连接状态（简洁文案）
+	// 顶部：当前连接状态（简洁文案，居中显示）
 	statusHeader := container.NewCenter(container.NewHBox(
 		sp.statusIcon,
 		NewSpacer(SpacingSmall),
 		sp.proxyStatusLabel,
 	))
+	statusHeader = container.NewPadded(statusHeader)
 
-	// 中部：巨大的主开关按钮（居中）
-	mainControlArea := container.NewCenter(sp.mainToggleButton)
+	// 中部：巨大的主开关按钮（居中，更大的尺寸）
+	mainControlArea := container.NewCenter(container.NewPadded(sp.mainToggleButton))
 
-	// 下方：当前节点 + 模式 + 延迟（单行简洁信息）
-	nodeAndMode := container.NewHBox(
+	// 下方：当前节点信息（可点击，跳转到节点选择页面）
+	// 创建一个可点击的节点信息区域
+	nodeInfoButton := widget.NewButton("", func() {
+		// 跳转到节点选择页面
+		if sp.appState != nil && sp.appState.MainWindow != nil {
+			sp.appState.MainWindow.ShowNodePage()
+		}
+	})
+	nodeInfoButton.Importance = widget.LowImportance
+	// 将节点信息作为按钮内容
+	nodeInfoContent := container.NewHBox(
 		sp.serverIcon,
 		NewSpacer(SpacingSmall),
 		sp.serverNameLabel,
-		NewSpacer(SpacingMedium),
-		widget.NewLabel("模式:"),
+		NewSpacer(SpacingSmall),
+		sp.delayLabel,
+	)
+	// 使用 Stack 将按钮和内容叠加，使整个区域可点击
+	nodeInfoArea := container.NewStack(
+		nodeInfoButton,
+		container.NewPadded(nodeInfoContent),
+	)
+
+	// 模式选择（简化显示，符合 UI.md 设计）
+	modeLabel := widget.NewLabel("⚙️ 模式:")
+	modeInfo := container.NewHBox(
+		modeLabel,
 		NewSpacer(SpacingSmall),
 		sp.proxyModeSelect,
-		NewSpacer(SpacingMedium),
-		sp.delayLabel,
-		layout.NewSpacer(),
+	)
+	modeInfo = container.NewPadded(modeInfo)
+
+	// 节点和模式信息垂直排列
+	nodeAndMode := container.NewVBox(
+		nodeInfoArea,
+		modeInfo,
 	)
 	nodeAndMode = container.NewPadded(nodeAndMode)
 
 	// 底部：实时流量占位（未来可替换为小曲线图）
 	trafficPlaceholder := widget.NewLabel("实时流量图（预留）")
-	trafficArea := container.NewCenter(trafficPlaceholder)
+	trafficPlaceholder.Alignment = fyne.TextAlignCenter
+	trafficArea := container.NewCenter(container.NewPadded(trafficPlaceholder))
 
-	// 整体垂直排版，类似 UI.md 草图
+	// 整体垂直排版，类似 UI.md 草图，增加间距使布局更清晰
 	content := container.NewVBox(
-		container.NewPadded(statusHeader),
-		container.NewPadded(mainControlArea),
+		statusHeader,
+		NewSpacer(SpacingLarge),
+		mainControlArea,
+		NewSpacer(SpacingLarge),
 		nodeAndMode,
-		container.NewPadded(trafficArea),
+		NewSpacer(SpacingMedium),
+		trafficArea,
 	)
 
 	// 让内容在窗口中垂直居中一些，不要顶到上边缘
@@ -243,28 +273,37 @@ func (sp *StatusPanel) updateSystemProxyPort() {
 	sp.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", proxyPort)
 }
 
-// updateDelayLabel 根据当前选中服务器更新延迟显示
+// updateDelayLabel 根据当前选中服务器更新延迟显示（符合 UI.md 设计：32ms）
 func (sp *StatusPanel) updateDelayLabel() {
 	if sp.delayLabel == nil || sp.appState == nil || sp.appState.ServerManager == nil {
 		return
 	}
 
-	delayText := "延迟: -"
+	delayText := "-"
 	if sp.appState.SelectedServerID != "" {
 		if srv, err := sp.appState.ServerManager.GetServer(sp.appState.SelectedServerID); err == nil && srv != nil {
 			if srv.Delay > 0 {
-				delayText = fmt.Sprintf("延迟: %d ms", srv.Delay)
+				// 根据延迟值设置颜色指示（UI.md 要求：绿色<100ms，黄色100-200ms，红色>200ms）
+				var colorIndicator string
+				if srv.Delay < 100 {
+					colorIndicator = "🟢"
+				} else if srv.Delay <= 200 {
+					colorIndicator = "🟡"
+				} else {
+					colorIndicator = "🔴"
+				}
+				delayText = fmt.Sprintf("%s %dms", colorIndicator, srv.Delay)
 			} else if srv.Delay < 0 {
-				delayText = "延迟: 测试失败"
+				delayText = "🔴 超时"
 			} else {
-				delayText = "延迟: 未测"
+				delayText = "⚪ N/A"
 			}
 		}
 	}
 	sp.delayLabel.SetText(delayText)
 }
 
-// updateMainToggleButton 根据代理运行状态更新主开关按钮的文案
+// updateMainToggleButton 根据代理运行状态更新主开关按钮的文案和样式
 // 这里只负责 UI 文案，真正的启动/停止逻辑由 onToggleProxy 回调处理
 func (sp *StatusPanel) updateMainToggleButton() {
 	if sp.mainToggleButton == nil {
@@ -277,10 +316,10 @@ func (sp *StatusPanel) updateMainToggleButton() {
 	}
 
 	if isRunning {
-		sp.mainToggleButton.SetText("● 已连接（点击断开）")
+		sp.mainToggleButton.SetText("🟢 ON")
 		sp.mainToggleButton.Importance = widget.HighImportance
 	} else {
-		sp.mainToggleButton.SetText("○ 未连接（点击连接）")
+		sp.mainToggleButton.SetText("⚪ OFF")
 		sp.mainToggleButton.Importance = widget.MediumImportance
 	}
 }
