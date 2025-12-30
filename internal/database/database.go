@@ -8,7 +8,6 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"myproxy.com/p/internal/config"
 )
 
 // DB 数据库连接
@@ -233,14 +232,6 @@ func CloseDB() error {
 	return nil
 }
 
-// Subscription 表示一个订阅配置，包含 URL 和标签信息。
-type Subscription struct {
-	ID        int64     `json:"id"`
-	URL       string    `json:"url"`
-	Label     string    `json:"label"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
 
 // AddOrUpdateSubscription 添加新订阅或更新现有订阅。
 // 如果订阅 URL 已存在，则更新其标签；否则创建新订阅。
@@ -438,7 +429,7 @@ func GetServerCountBySubscriptionID(subscriptionID int64) (int, error) {
 //   - subscriptionID: 关联的订阅 ID（可选，可为 nil）
 //
 // 返回：错误（如果有）
-func AddOrUpdateServer(server config.Server, subscriptionID *int64) error {
+func AddOrUpdateServer(server Node, subscriptionID *int64) error {
 	now := time.Now()
 
 	// 检查服务器是否存在
@@ -509,8 +500,8 @@ func AddOrUpdateServer(server config.Server, subscriptionID *int64) error {
 //   - id: 服务器 ID
 //
 // 返回：服务器实例和错误（如果未找到或发生错误）
-func GetServer(id string) (*config.Server, error) {
-	var server config.Server
+func GetServer(id string) (*Node, error) {
+	var server Node
 	var selected, enabled int
 
 	err := DB.QueryRow(
@@ -549,7 +540,7 @@ func GetServer(id string) (*config.Server, error) {
 
 // GetAllServers 获取所有服务器列表。
 // 返回：服务器列表和错误（如果有）
-func GetAllServers() ([]config.Server, error) {
+func GetAllServers() ([]Node, error) {
 	rows, err := DB.Query(
 		`SELECT id, name, addr, port, username, password, delay, selected, enabled,
 			node_protocol_type, vmess_version, vmess_uuid, vmess_alter_id, vmess_security, vmess_network,
@@ -562,9 +553,9 @@ func GetAllServers() ([]config.Server, error) {
 	}
 	defer rows.Close()
 
-	var servers []config.Server
+	var servers []Node
 	for rows.Next() {
-		var server config.Server
+		var server Node
 		var selected, enabled int
 
 		if err := rows.Scan(&server.ID, &server.Name, &server.Addr, &server.Port,
@@ -601,7 +592,7 @@ func GetAllServers() ([]config.Server, error) {
 //   - subscriptionID: 订阅 ID
 //
 // 返回：服务器列表和错误（如果有）
-func GetServersBySubscriptionID(subscriptionID int64) ([]config.Server, error) {
+func GetServersBySubscriptionID(subscriptionID int64) ([]Node, error) {
 	rows, err := DB.Query(
 		`SELECT id, name, addr, port, username, password, delay, selected, enabled,
 			node_protocol_type, vmess_version, vmess_uuid, vmess_alter_id, vmess_security, vmess_network,
@@ -615,9 +606,9 @@ func GetServersBySubscriptionID(subscriptionID int64) ([]config.Server, error) {
 	}
 	defer rows.Close()
 
-	var servers []config.Server
+	var servers []Node
 	for rows.Next() {
-		var server config.Server
+		var server Node
 		var selected, enabled int
 
 		if err := rows.Scan(&server.ID, &server.Name, &server.Addr, &server.Port,

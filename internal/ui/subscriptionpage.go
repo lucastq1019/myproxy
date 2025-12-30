@@ -15,95 +15,6 @@ import (
 	"myproxy.com/p/internal/database"
 )
 
-// showFormDialogWithIconButtons 显示自定义表单对话框，按钮仅显示图标
-func showFormDialogWithIconButtons(title string, items []*widget.FormItem, onConfirm func(), parent fyne.Window) {
-	form := widget.NewForm(items...)
-	
-	// 确认按钮（仅图标）
-	confirmBtn := widget.NewButtonWithIcon("", theme.ConfirmIcon(), func() {
-		onConfirm()
-	})
-	confirmBtn.Importance = widget.HighImportance
-	
-	// 取消按钮（仅图标）
-	cancelBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
-		// 关闭对话框
-	})
-	cancelBtn.Importance = widget.LowImportance
-	
-	// 按钮容器
-	buttonBar := container.NewHBox(
-		layout.NewSpacer(),
-		cancelBtn,
-		confirmBtn,
-	)
-	
-	// 对话框内容
-	content := container.NewVBox(
-		widget.NewLabelWithStyle(title, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		form,
-		buttonBar,
-	)
-	
-	// 创建自定义对话框
-	d := dialog.NewCustom("", "", content, parent)
-	
-	// 设置取消按钮的关闭行为
-	cancelBtn.OnTapped = func() {
-		d.Hide()
-	}
-	
-	d.Resize(fyne.NewSize(420, 240))
-	d.Show()
-}
-
-// showConfirmDialogWithIconButtons 显示自定义确认对话框，按钮仅显示图标
-func showConfirmDialogWithIconButtons(title, message string, onConfirm func(), parent fyne.Window) {
-	// 确认按钮（仅图标）
-	confirmBtn := widget.NewButtonWithIcon("", theme.ConfirmIcon(), func() {
-		onConfirm()
-	})
-	confirmBtn.Importance = widget.HighImportance
-	
-	// 取消按钮（仅图标）
-	cancelBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
-		// 关闭对话框
-	})
-	cancelBtn.Importance = widget.LowImportance
-	
-	// 按钮容器
-	buttonBar := container.NewHBox(
-		layout.NewSpacer(),
-		cancelBtn,
-		confirmBtn,
-	)
-	
-	// 对话框内容
-	content := container.NewVBox(
-		widget.NewLabelWithStyle(title, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		widget.NewLabel(message),
-		buttonBar,
-	)
-	
-	// 创建自定义对话框
-	d := dialog.NewCustom("", "", content, parent)
-	
-	// 设置取消按钮的关闭行为
-	cancelBtn.OnTapped = func() {
-		d.Hide()
-	}
-	
-	// 设置确认按钮的关闭行为
-	originalOnConfirm := confirmBtn.OnTapped
-	confirmBtn.OnTapped = func() {
-		originalOnConfirm()
-		d.Hide()
-	}
-	
-	d.Resize(fyne.NewSize(400, 180))
-	d.Show()
-}
-
 // SubscriptionPage 订阅管理页面
 type SubscriptionPage struct {
 	appState      *AppState
@@ -335,7 +246,7 @@ func NewSubscriptionCard(page *SubscriptionPage) *SubscriptionCard {
 }
 
 func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
-	bg := canvas.NewRectangle(theme.InputBackgroundColor())
+	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
 	bg.CornerRadius = 10
 
 	// 文字信息排版

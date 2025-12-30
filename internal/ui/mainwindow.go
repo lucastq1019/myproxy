@@ -81,7 +81,6 @@ func DefaultLayoutConfig() *LayoutConfig {
 // 它负责协调订阅管理、服务器列表、日志显示和状态信息四个主要区域的显示。
 type MainWindow struct {
 	appState          *AppState
-	serverListPanel   *ServerListPanel
 	logsPanel         *LogsPanel
 	statusPanel       *StatusPanel
 	mainSplit         *container.Split // 主分割容器（服务器列表和日志，保留用于日志面板独立窗口等场景）
@@ -91,8 +90,13 @@ type MainWindow struct {
 
 	// 单窗口多页面：通过 SetContent() 在一个窗口内切换不同的 Container
 	homePage         fyne.CanvasObject // 主界面（极简一键开关）
+
 	nodePage         fyne.CanvasObject // 节点列表页面
+	nodePageInstance *NodePage // 节点列表页面实例
+	
 	settingsPage     fyne.CanvasObject // 设置页面
+
+
 	subscriptionPage fyne.CanvasObject // 订阅管理页面
 	subscriptionPageInstance *SubscriptionPage // 订阅管理页面实例
 }
@@ -114,12 +118,12 @@ func NewMainWindow(appState *AppState) *MainWindow {
 	mw.loadLayoutConfig()
 
 	// 创建各个面板
-	mw.serverListPanel = NewServerListPanel(appState)
+	// mw.serverListPanel = NewServerListPanel(appState)
 	mw.logsPanel = NewLogsPanel(appState)
 	mw.statusPanel = NewStatusPanel(appState)
 
 	// 设置状态面板引用，以便服务器列表可以刷新状态
-	mw.serverListPanel.SetStatusPanel(mw.statusPanel)
+	// mw.serverListPanel.SetStatusPanel(mw.statusPanel)
 
 	// 设置主窗口和日志面板引用到 AppState，以便其他组件可以刷新日志面板
 	appState.MainWindow = mw
@@ -186,9 +190,9 @@ func (mw *MainWindow) Build() fyne.CanvasObject {
 // 注意：此方法包含安全检查，防止在窗口移动/缩放时出现空指针错误。
 func (mw *MainWindow) Refresh() {
 	// 安全检查：确保所有面板都已初始化
-	if mw.serverListPanel != nil {
-		mw.serverListPanel.Refresh()
-	}
+	// if mw.serverListPanel != nil {
+	// 	mw.serverListPanel.Refresh()
+	// }
 	if mw.logsPanel != nil {
 		mw.logsPanel.Refresh() // 刷新日志面板，显示最新日志
 	}
@@ -242,11 +246,12 @@ func (mw *MainWindow) initPages() {
 	// 主界面（homePage）：极简状态 + 一键主开关
 	mw.homePage = mw.buildHomePage()
 
-	// 节点列表页面（nodePage）：顶部返回 + 标题，下方为服务器列表
-	mw.nodePage = mw.buildNodePage()
-
 	// 设置页面（settingsPage）：顶部返回 + 标题，下方预留设置内容
 	mw.settingsPage = mw.buildSettingsPage()
+
+	// 节点列表页面（nodePage）：服务器列表和管理功能
+	mw.nodePageInstance = NewNodePage(mw.appState)
+	mw.nodePage = mw.nodePageInstance.Build()
 
 	// 订阅管理页面（subscriptionPage）：订阅列表和管理功能
 	mw.subscriptionPageInstance = NewSubscriptionPage(mw.appState)
@@ -286,21 +291,6 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	)
 }
 
-// buildNodePage 构建节点列表页面 Container（nodePage）
-// 返回按钮统一在 serverlist.go 中管理
-func (mw *MainWindow) buildNodePage() fyne.CanvasObject {
-	if mw.serverListPanel == nil {
-		return container.NewWithoutLayout()
-	}
-
-	listContent := mw.serverListPanel.Build()
-	if listContent == nil {
-		listContent = container.NewWithoutLayout()
-	}
-
-	// 直接返回列表内容，返回按钮已在 ServerListPanel.Build() 中包含
-	return listContent
-}
 
 // buildSettingsPage 构建设置页面 Container（settingsPage）
 func (mw *MainWindow) buildSettingsPage() fyne.CanvasObject {
@@ -385,8 +375,12 @@ func (mw *MainWindow) navigateToPage(pageType PageType, pushCurrent bool) {
 		pageContent = mw.homePage
 	case PageTypeNode:
 		if mw.nodePage == nil {
-			mw.nodePage = mw.buildNodePage()
+			mw.nodePage = mw.nodePageInstance.Build()
 		}
+		// 刷新服务器列表
+		// if mw.serverListPanel != nil {
+		// 	mw.serverListPanel.Refresh()
+		// }
 		pageContent = mw.nodePage
 	case PageTypeSettings:
 		if mw.settingsPage == nil {

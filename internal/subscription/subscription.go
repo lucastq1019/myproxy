@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"myproxy.com/p/internal/config"
 	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/server"
 )
@@ -20,14 +19,14 @@ import (
 // ServerParser 服务器配置解析器接口
 type ServerParser interface {
 	// Parse 解析服务器配置字符串，返回服务器配置和错误
-	Parse(content string) (*config.Server, error)
+	Parse(content string) (*database.Node, error)
 }
 
 // VMessParser VMess协议解析器
 type VMessParser struct{}
 
 // Parse 解析VMess协议
-func (p *VMessParser) Parse(content string) (*config.Server, error) {
+func (p *VMessParser) Parse(content string) (*database.Node, error) {
 	// 移除前缀
 	vmessData := strings.TrimPrefix(content, "vmess://")
 	// 解码Base64
@@ -79,7 +78,7 @@ func (p *VMessParser) Parse(content string) (*config.Server, error) {
 	serverID := server.GenerateServerID(vmessConfig.Add, port, vmessConfig.Id)
 
 	// 创建服务器配置，包含所有字段
-	s := &config.Server{
+	s := &database.Node{
 		ID:           serverID,
 		Name:         vmessConfig.Ps,
 		Addr:         vmessConfig.Add,
@@ -126,7 +125,7 @@ type SSConfig struct {
 type SSParser struct{}
 
 // Parse 解析SS协议
-func (p *SSParser) Parse(content string) (*config.Server, error) {
+func (p *SSParser) Parse(content string) (*database.Node, error) {
 	// 移除前缀
 	ssData := strings.TrimPrefix(content, "ss://")
 
@@ -220,7 +219,7 @@ func (p *SSParser) Parse(content string) (*config.Server, error) {
 	serverID := server.GenerateServerID(addr, port, password)
 
 	// 创建服务器配置
-	s := &config.Server{
+	s := &database.Node{
 		ID:           serverID,
 		Name:         fmt.Sprintf("%s:%d", addr, port),
 		Addr:         addr,
@@ -266,7 +265,7 @@ type TrojanConfig struct {
 type TrojanParser struct{}
 
 // Parse 解析Trojan协议
-func (p *TrojanParser) Parse(content string) (*config.Server, error) {
+func (p *TrojanParser) Parse(content string) (*database.Node, error) {
 	// 移除前缀
 	trojanData := strings.TrimPrefix(content, "trojan://")
 
@@ -329,7 +328,7 @@ func (p *TrojanParser) Parse(content string) (*config.Server, error) {
 	serverID := server.GenerateServerID(addr, port, password)
 
 	// 创建服务器配置
-	s := &config.Server{
+	s := &database.Node{
 		ID:           serverID,
 		Name:         name,
 		Addr:         addr,
@@ -361,7 +360,7 @@ func (p *TrojanParser) Parse(content string) (*config.Server, error) {
 type SOCKS5Parser struct{}
 
 // Parse 解析SOCKS5协议
-func (p *SOCKS5Parser) Parse(content string) (*config.Server, error) {
+func (p *SOCKS5Parser) Parse(content string) (*database.Node, error) {
 	socks5Regex := regexp.MustCompile(`^socks5://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$`)
 	matches := socks5Regex.FindStringSubmatch(content)
 	if matches == nil {
@@ -382,7 +381,7 @@ func (p *SOCKS5Parser) Parse(content string) (*config.Server, error) {
 	serverID := server.GenerateServerID(addr, port, username)
 
 	// 创建服务器配置
-	s := &config.Server{
+	s := &database.Node{
 		ID:           serverID,
 		Name:         fmt.Sprintf("%s:%d", addr, port),
 		Addr:         addr,
@@ -403,7 +402,7 @@ func (p *SOCKS5Parser) Parse(content string) (*config.Server, error) {
 type SimpleParser struct{}
 
 // Parse 解析简单格式
-func (p *SimpleParser) Parse(content string) (*config.Server, error) {
+func (p *SimpleParser) Parse(content string) (*database.Node, error) {
 	simpleRegex := regexp.MustCompile(`^([^:]+):(\d+)\s+([^\s]+)\s+([^\s]+)$`)
 	matches := simpleRegex.FindStringSubmatch(content)
 	if matches == nil {
@@ -424,7 +423,7 @@ func (p *SimpleParser) Parse(content string) (*config.Server, error) {
 	serverID := server.GenerateServerID(addr, port, username)
 
 	// 创建服务器配置
-	s := &config.Server{
+	s := &database.Node{
 		ID:           serverID,
 		Name:         fmt.Sprintf("%s:%d", addr, port),
 		Addr:         addr,
@@ -490,7 +489,7 @@ func (sm *SubscriptionManager) GetSubscriptions() []*database.Subscription {
 
 // FetchSubscription 从URL获取订阅服务器列表
 // label 参数用于为订阅添加标签，如果为空则使用默认标签
-func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([]config.Server, error) {
+func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([]database.Node, error) {
 	// 发送HTTP请求获取订阅内容
 	resp, err := sm.client.Get(url)
 	if err != nil {
@@ -639,7 +638,7 @@ func (sm *SubscriptionManager) UpdateSubscriptionByID(id int64) error {
 }
 
 // parseSubscription 解析订阅内容
-func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Server, error) {
+func (sm *SubscriptionManager) parseSubscription(content string) ([]database.Node, error) {
 	// 尝试解码Base64
 	decoded, err := base64.StdEncoding.DecodeString(content)
 	if err == nil {
@@ -657,10 +656,10 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 
 	if err := json.Unmarshal([]byte(content), &jsonServers); err == nil {
 		// JSON格式解析成功
-		servers := make([]config.Server, len(jsonServers))
+		servers := make([]database.Node, len(jsonServers))
 		for i, js := range jsonServers {
 			rawConfig, _ := json.Marshal(js)
-			servers[i] = config.Server{
+			servers[i] = database.Node{
 				ID:           server.GenerateServerID(js.Addr, js.Port, js.Username),
 				Name:         js.Name,
 				Addr:         js.Addr,
@@ -679,7 +678,7 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 
 	// 2. 尝试Clash格式 (每行一个服务器配置)
 	lines := strings.Split(content, "\n")
-	var servers []config.Server
+	var servers []database.Node
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -694,7 +693,7 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]config.Serve
 		}
 
 		// 使用注册的解析器解析服务器配置
-		var parsedServer *config.Server
+		var parsedServer *database.Node
 
 		// 直接根据前缀获取解析器
 		// 查找字符串中第一个 "://" 出现的位置

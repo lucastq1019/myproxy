@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"myproxy.com/p/internal/config"
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/server"
 )
 
@@ -23,7 +23,7 @@ func NewPingManager(serverManager *server.ServerManager) *PingManager {
 }
 
 // TestServerDelay 测试单个服务器延迟
-func (pm *PingManager) TestServerDelay(server config.Server) (int, error) {
+func (pm *PingManager) TestServerDelay(server database.Node) (int, error) {
 	// 使用TCP连接测试延迟
 	addr := fmt.Sprintf("%s:%d", server.Addr, server.Port)
 	start := time.Now()
@@ -55,7 +55,7 @@ func (pm *PingManager) TestAllServersDelay() map[string]int {
 		}
 
 		wg.Add(1)
-		go func(server config.Server) {
+		go func(server database.Node) {
 			defer wg.Done()
 
 			delay, err := pm.TestServerDelay(server)

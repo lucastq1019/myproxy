@@ -12,7 +12,7 @@ import (
 
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf"
-	"myproxy.com/p/internal/config"
+	"myproxy.com/p/internal/database"
 )
 
 // LogCallback 定义日志回调函数类型
@@ -239,7 +239,7 @@ func (xi *XrayInstance) GetInstance() *core.Instance {
 }
 
 // CreateOutboundFromServer 根据服务器配置创建 xray 出站配置
-func CreateOutboundFromServer(server *config.Server) (map[string]interface{}, error) {
+func CreateOutboundFromServer(server *database.Node) (map[string]interface{}, error) {
 	var outbound map[string]interface{}
 
 	switch server.ProtocolType {
@@ -395,7 +395,7 @@ func getVMessSecurity(security string) string {
 }
 
 // buildVMessStreamSettings 构建 VMess 传输协议配置
-func buildVMessStreamSettings(server *config.Server) map[string]interface{} {
+func buildVMessStreamSettings(server *database.Node) map[string]interface{} {
 	streamSettings := map[string]interface{}{
 		"network": getVMessNetwork(server.VMessNetwork),
 	}
@@ -460,7 +460,7 @@ func getVMessNetwork(network string) string {
 }
 
 // buildSSStreamSettings 构建 Shadowsocks 传输协议配置
-func buildSSStreamSettings(server *config.Server) map[string]interface{} {
+func buildSSStreamSettings(server *database.Node) map[string]interface{} {
 	// 默认使用 tcp
 	network := "tcp"
 	streamSettings := map[string]interface{}{
@@ -477,7 +477,7 @@ func buildSSStreamSettings(server *config.Server) map[string]interface{} {
 // localPort: 本地 SOCKS5 监听端口（默认 10080）
 // server: 服务器配置，用于创建出站配置
 // logFilePath: 日志文件路径（可选，如果为空则不设置日志文件）
-func CreateXrayConfig(localPort int, server *config.Server, logFilePath ...string) ([]byte, error) {
+func CreateXrayConfig(localPort int, server *database.Node, logFilePath ...string) ([]byte, error) {
 	if localPort == 0 {
 		localPort = 10080
 	}
