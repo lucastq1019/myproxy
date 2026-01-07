@@ -30,7 +30,7 @@ func (tm *TrayManager) SetupTray() {
 		fmt.Println("应用支持桌面扩展，开始设置托盘图标...")
 		
 		// 创建托盘图标
-		icon := createTrayIconResource()
+		icon := createTrayIconResource(tm.appState)
 		if icon == nil {
 			fmt.Println("警告: 创建托盘图标失败")
 			return

@@ -1,12 +1,17 @@
 package ui
 
 import (
+	"fmt"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"myproxy.com/p/internal/logging"
+	"myproxy.com/p/internal/service"
 	"myproxy.com/p/internal/store"
+	"myproxy.com/p/internal/systemproxy"
 )
 
 // PageType 页面类型枚举
@@ -68,12 +73,24 @@ func DefaultLayoutConfig() *LayoutConfig {
 	return store.DefaultLayoutConfig()
 }
 
+// 系统代理模式常量定义
+const (
+	// 完整模式名称
+	SystemProxyModeClear      = "清除系统代理"
+	SystemProxyModeAuto       = "自动配置系统代理"
+	SystemProxyModeTerminal   = "环境变量代理"
+
+	// 简短模式名称（用于UI显示）
+	SystemProxyModeShortClear    = "清除"
+	SystemProxyModeShortAuto     = "系统"
+	SystemProxyModeShortTerminal = "终端"
+)
+
 // MainWindow 管理主窗口的布局和各个面板组件。
 // 它负责协调订阅管理、服务器列表、日志显示和状态信息四个主要区域的显示。
 type MainWindow struct {
 	appState          *AppState
 	logsPanel         *LogsPanel
-	statusPanel       *StatusPanel
 	mainSplit         *container.Split // 主分割容器（服务器列表和日志，保留用于日志面板独立窗口等场景）
 	pageStack         *PageStack      // 路由栈，用于管理页面导航历史
 	currentPage       PageType        // 当前页面类型
@@ -86,9 +103,17 @@ type MainWindow struct {
 	
 	settingsPage     fyne.CanvasObject // 设置页面
 
-
 	subscriptionPage fyne.CanvasObject // 订阅管理页面
 	subscriptionPageInstance *SubscriptionPage // 订阅管理页面实例
+
+	// 主界面状态UI组件（使用双向绑定）
+	mainToggleButton *widget.Button      // 主开关按钮（连接/断开）
+	proxyStatusLabel *widget.Label        // 代理状态标签（绑定到 ProxyStatusBinding）
+	portLabel        *widget.Label        // 端口标签（绑定到 PortBinding）
+	serverNameLabel  *widget.Label        // 服务器名称标签（绑定到 ServerNameBinding）
+	delayLabel       *widget.Label        // 延迟标签
+	proxyModeSelect  *widget.Select       // 系统代理模式选择
+	systemProxy      *systemproxy.SystemProxy // 系统代理管理器
 }
 
 // NewMainWindow 创建并初始化主窗口。
@@ -107,16 +132,17 @@ func NewMainWindow(appState *AppState) *MainWindow {
 	// 布局配置由 Store 管理，无需在这里加载
 
 	// 创建各个面板
-	// mw.serverListPanel = NewServerListPanel(appState)
 	mw.logsPanel = NewLogsPanel(appState)
-	mw.statusPanel = NewStatusPanel(appState)
 
-	// 设置状态面板引用，以便服务器列表可以刷新状态
-	// mw.serverListPanel.SetStatusPanel(mw.statusPanel)
+	// 创建系统代理管理器（默认使用 localhost:10080）
+	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10080)
 
 	// 设置主窗口和日志面板引用到 AppState，以便其他组件可以刷新日志面板
 	appState.MainWindow = mw
 	appState.LogsPanel = mw.logsPanel
+
+	// 恢复系统代理状态（在应用启动时）
+	mw.restoreSystemProxyState()
 
 	return mw
 }
@@ -159,15 +185,14 @@ func (mw *MainWindow) Build() fyne.CanvasObject {
 // 注意：此方法包含安全检查，防止在窗口移动/缩放时出现空指针错误。
 func (mw *MainWindow) Refresh() {
 	// 安全检查：确保所有面板都已初始化
-	// if mw.serverListPanel != nil {
-	// 	mw.serverListPanel.Refresh()
-	// }
 	if mw.logsPanel != nil {
 		mw.logsPanel.Refresh() // 刷新日志面板，显示最新日志
 	}
 	// 使用双向绑定，只需更新绑定数据，UI 会自动更新
 	if mw.appState != nil {
 		mw.appState.UpdateProxyStatus()
+		// 刷新主界面状态（延迟标签、主按钮等）
+		mw.refreshHomePageStatus()
 		// 订阅标签绑定由 Store 自动管理，无需手动更新
 	}
 }
@@ -236,18 +261,134 @@ func (mw *MainWindow) initPages() {
 }
 
 // buildHomePage 构建主界面 Container（homePage）
+// 使用双向绑定直接构建状态UI，不再依赖 StatusPanel
 func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
-	if mw.statusPanel == nil {
+	if mw.appState == nil {
 		return container.NewWithoutLayout()
 	}
 
-	statusArea := mw.statusPanel.Build()
-	if statusArea == nil {
-		statusArea = container.NewWithoutLayout()
+	// 创建状态标签（使用双向绑定）
+	if mw.proxyStatusLabel == nil {
+		if mw.appState.ProxyStatusBinding != nil {
+			mw.proxyStatusLabel = widget.NewLabelWithData(mw.appState.ProxyStatusBinding)
+		} else {
+			mw.proxyStatusLabel = widget.NewLabel("代理状态: 未知")
+		}
+		mw.proxyStatusLabel.Wrapping = fyne.TextWrapOff
 	}
 
-	// 顶部标题栏：左侧应用名称，右侧为“节点”和“设置”入口
-	// 顶部标题栏：右侧仅保留设置入口（符合 UI.md 设计：设置入口据右侧）
+	if mw.portLabel == nil {
+		if mw.appState.PortBinding != nil {
+			mw.portLabel = widget.NewLabelWithData(mw.appState.PortBinding)
+		} else {
+			mw.portLabel = widget.NewLabel("监听端口: -")
+		}
+		mw.portLabel.Wrapping = fyne.TextWrapOff
+	}
+
+	if mw.serverNameLabel == nil {
+		if mw.appState.ServerNameBinding != nil {
+			mw.serverNameLabel = widget.NewLabelWithData(mw.appState.ServerNameBinding)
+		} else {
+			mw.serverNameLabel = widget.NewLabel("当前服务器: 无")
+		}
+		mw.serverNameLabel.Wrapping = fyne.TextWrapOff
+	}
+
+	if mw.delayLabel == nil {
+		mw.delayLabel = widget.NewLabel("-")
+		mw.delayLabel.Wrapping = fyne.TextWrapOff
+	}
+
+	// 创建状态图标
+	statusIcon := widget.NewIcon(theme.CancelIcon())
+	mw.updateStatusIcon(statusIcon)
+
+	// 创建主开关按钮
+	if mw.mainToggleButton == nil {
+		mw.mainToggleButton = widget.NewButton("", mw.onToggleProxy)
+		mw.mainToggleButton.Importance = widget.HighImportance
+		mw.mainToggleButton.Resize(fyne.NewSize(120, 120))
+		mw.updateMainToggleButton()
+	}
+
+	// 创建系统代理模式选择
+	if mw.proxyModeSelect == nil {
+		mw.proxyModeSelect = widget.NewSelect(
+			[]string{
+				SystemProxyModeShortClear,
+				SystemProxyModeShortAuto,
+				SystemProxyModeShortTerminal,
+			},
+			mw.onProxyModeChanged,
+		)
+		mw.proxyModeSelect.PlaceHolder = "智能模式"
+	}
+
+	// 更新延迟标签
+	mw.updateDelayLabel()
+
+	// 顶部：当前连接状态（简洁文案，居中显示）
+	statusHeader := container.NewCenter(container.NewHBox(
+		statusIcon,
+		NewSpacer(SpacingSmall),
+		mw.proxyStatusLabel,
+	))
+	statusHeader = container.NewPadded(statusHeader)
+
+	// 中部：巨大的主开关按钮（居中，更大的尺寸）
+	mainControlArea := container.NewCenter(container.NewPadded(mw.mainToggleButton))
+
+	// 下方：当前节点信息（可点击，跳转到节点选择页面）
+	nodeInfoButton := widget.NewButton("", func() {
+		mw.ShowNodePage()
+	})
+	nodeInfoButton.Importance = widget.LowImportance
+	nodeInfoContent := container.NewHBox(
+		widget.NewIcon(theme.ComputerIcon()),
+		NewSpacer(SpacingSmall),
+		mw.serverNameLabel,
+		NewSpacer(SpacingSmall),
+		mw.delayLabel,
+	)
+	nodeInfoArea := container.NewStack(
+		nodeInfoButton,
+		container.NewPadded(nodeInfoContent),
+	)
+
+	// 模式选择
+	modeLabel := widget.NewLabel("⚙️ 模式:")
+	modeInfo := container.NewHBox(
+		modeLabel,
+		NewSpacer(SpacingSmall),
+		mw.proxyModeSelect,
+	)
+	modeInfo = container.NewPadded(modeInfo)
+
+	// 节点和模式信息垂直排列
+	nodeAndMode := container.NewVBox(
+		nodeInfoArea,
+		modeInfo,
+	)
+	nodeAndMode = container.NewPadded(nodeAndMode)
+
+	// 底部：实时流量占位（未来可替换为小曲线图）
+	trafficPlaceholder := widget.NewLabel("实时流量图（预留）")
+	trafficPlaceholder.Alignment = fyne.TextAlignCenter
+	trafficArea := container.NewCenter(container.NewPadded(trafficPlaceholder))
+
+	// 整体垂直排版
+	content := container.NewVBox(
+		statusHeader,
+		NewSpacer(SpacingLarge),
+		mainControlArea,
+		NewSpacer(SpacingLarge),
+		nodeAndMode,
+		NewSpacer(SpacingMedium),
+		trafficArea,
+	)
+
+	// 顶部标题栏：右侧仅保留设置入口
 	headerButtons := container.NewHBox(
 		layout.NewSpacer(),
 		NewStyledButton("设置", theme.SettingsIcon(), func() {
@@ -256,15 +397,12 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	)
 	headerBar := container.NewPadded(headerButtons)
 
-	// 中部内容：状态面板（内部负责实现“一键主开关 + 状态 + 节点 + 模式 + 流量图占位”）
-	centerContent := container.NewCenter(statusArea)
-
 	return container.NewBorder(
 		headerBar,
+		NewSpacer(SpacingLarge), // 底部预留少量空白
 		nil,
 		nil,
-		nil,
-		centerContent,
+		container.NewCenter(content),
 	)
 }
 
@@ -354,10 +492,14 @@ func (mw *MainWindow) navigateToPage(pageType PageType, pushCurrent bool) {
 		if mw.nodePage == nil {
 			mw.nodePage = mw.nodePageInstance.Build()
 		}
-		// 刷新服务器列表
-		// if mw.serverListPanel != nil {
-		// 	mw.serverListPanel.Refresh()
-		// }
+		// 刷新服务器列表并滚动到选中位置
+		if mw.nodePageInstance != nil {
+			mw.nodePageInstance.Refresh()
+			// 延迟执行滚动，确保列表已渲染
+			fyne.Do(func() {
+				mw.nodePageInstance.scrollToSelected()
+			})
+		}
 		pageContent = mw.nodePage
 	case PageTypeSettings:
 		if mw.settingsPage == nil {
@@ -404,5 +546,255 @@ func (mw *MainWindow) ShowSettingsPage() {
 // ShowSubscriptionPage 切换到订阅管理页面（subscriptionPage）
 func (mw *MainWindow) ShowSubscriptionPage() {
 	mw.navigateToPage(PageTypeSubscription, true)
+}
+
+// onToggleProxy 主开关按钮回调：启动/停止代理
+func (mw *MainWindow) onToggleProxy() {
+	if mw.appState == nil {
+		return
+	}
+
+	// 检查代理是否正在运行
+	isRunning := false
+	if mw.appState.XrayInstance != nil {
+		isRunning = mw.appState.XrayInstance.IsRunning()
+	}
+
+	if isRunning {
+		// 停止代理
+		if mw.nodePageInstance != nil {
+			mw.nodePageInstance.StopProxy()
+		}
+	} else {
+		// 启动代理（使用当前选中的服务器）
+		if mw.nodePageInstance != nil {
+			mw.nodePageInstance.StartProxyForSelected()
+		}
+	}
+
+	// 更新状态
+	mw.refreshHomePageStatus()
+}
+
+// refreshHomePageStatus 刷新主界面状态显示
+func (mw *MainWindow) refreshHomePageStatus() {
+	if mw.appState != nil {
+		mw.appState.UpdateProxyStatus()
+	}
+	mw.updateDelayLabel()
+	if mw.mainToggleButton != nil {
+		mw.updateMainToggleButton()
+	}
+}
+
+// updateStatusIcon 更新状态图标
+func (mw *MainWindow) updateStatusIcon(icon *widget.Icon) {
+	if icon == nil {
+		return
+	}
+	
+	isRunning := false
+	if mw.appState != nil && mw.appState.XrayInstance != nil {
+		isRunning = mw.appState.XrayInstance.IsRunning()
+	}
+	
+	if isRunning {
+		icon.SetResource(theme.ConfirmIcon())
+	} else {
+		icon.SetResource(theme.CancelIcon())
+	}
+}
+
+// updateMainToggleButton 根据代理运行状态更新主开关按钮的文案和样式
+func (mw *MainWindow) updateMainToggleButton() {
+	if mw.mainToggleButton == nil {
+		return
+	}
+
+	isRunning := false
+	if mw.appState != nil && mw.appState.XrayInstance != nil {
+		isRunning = mw.appState.XrayInstance.IsRunning()
+	}
+
+	if isRunning {
+		mw.mainToggleButton.SetText("🟢 ON")
+		mw.mainToggleButton.Importance = widget.HighImportance
+	} else {
+		mw.mainToggleButton.SetText("⚪ OFF")
+		mw.mainToggleButton.Importance = widget.MediumImportance
+	}
+}
+
+// updateDelayLabel 根据当前选中服务器更新延迟显示
+func (mw *MainWindow) updateDelayLabel() {
+	if mw.delayLabel == nil || mw.appState == nil {
+		return
+	}
+
+	delayText := "-"
+	if mw.appState.Store != nil && mw.appState.Store.Nodes != nil {
+		selectedNode := mw.appState.Store.Nodes.GetSelected()
+		if selectedNode != nil {
+			if selectedNode.Delay > 0 {
+				var colorIndicator string
+				if selectedNode.Delay < 100 {
+					colorIndicator = "🟢"
+				} else if selectedNode.Delay <= 200 {
+					colorIndicator = "🟡"
+				} else {
+					colorIndicator = "🔴"
+				}
+				delayText = fmt.Sprintf("%s %dms", colorIndicator, selectedNode.Delay)
+			} else if selectedNode.Delay < 0 {
+				delayText = "🔴 超时"
+			} else {
+				delayText = "⚪ N/A"
+			}
+		}
+	}
+	mw.delayLabel.SetText(delayText)
+}
+
+// onProxyModeChanged 系统代理模式改变回调
+func (mw *MainWindow) onProxyModeChanged(shortText string) {
+	fullModeName := mw.getFullModeName(shortText)
+	if fullModeName != "" {
+		mw.applySystemProxyMode(fullModeName)
+	}
+}
+
+// getFullModeName 将简短文本映射到完整的功能名称
+func (mw *MainWindow) getFullModeName(shortText string) string {
+	switch shortText {
+	case SystemProxyModeShortClear:
+		return SystemProxyModeClear
+	case SystemProxyModeShortAuto:
+		return SystemProxyModeAuto
+	case SystemProxyModeShortTerminal:
+		return SystemProxyModeTerminal
+	default:
+		return shortText
+	}
+}
+
+// getShortModeName 将完整的功能名称映射到简短文本
+func (mw *MainWindow) getShortModeName(fullName string) string {
+	switch fullName {
+	case SystemProxyModeClear:
+		return SystemProxyModeShortClear
+	case SystemProxyModeAuto:
+		return SystemProxyModeShortAuto
+	case SystemProxyModeTerminal:
+		return SystemProxyModeShortTerminal
+	default:
+		return ""
+	}
+}
+
+// applySystemProxyMode 应用系统代理模式
+func (mw *MainWindow) applySystemProxyMode(fullModeName string) error {
+	if mw.appState == nil {
+		return fmt.Errorf("appState 未初始化")
+	}
+
+	// 确保 ProxyService 已初始化或更新
+	if mw.appState.ProxyService == nil {
+		// 如果 XrayInstance 已创建，初始化 ProxyService
+		if mw.appState.XrayInstance != nil {
+			mw.appState.ProxyService = service.NewProxyService(mw.appState.XrayInstance)
+		} else {
+			// 即使 XrayInstance 未创建，也创建 ProxyService（使用 nil）
+			mw.appState.ProxyService = service.NewProxyService(nil)
+		}
+	} else {
+		// 如果 ProxyService 已存在，更新 XrayInstance 引用
+		if mw.appState.XrayInstance != nil {
+			mw.appState.ProxyService.UpdateXrayInstance(mw.appState.XrayInstance)
+		}
+	}
+
+	// 将完整模式名称映射到简短模式名称
+	var mode string
+	switch fullModeName {
+	case SystemProxyModeClear:
+		mode = "clear"
+	case SystemProxyModeAuto:
+		mode = "auto"
+	case SystemProxyModeTerminal:
+		mode = "terminal"
+	default:
+		return fmt.Errorf("未知的系统代理模式: %s", fullModeName)
+	}
+
+	// 调用 ProxyService 应用系统代理模式
+	result := mw.appState.ProxyService.ApplySystemProxyMode(mode)
+
+	// 输出日志
+	if result.Error == nil {
+		mw.appState.AppendLog("INFO", "app", result.LogMessage)
+		if mw.appState.Logger != nil {
+			mw.appState.Logger.InfoWithType(logging.LogTypeApp, "%s", result.LogMessage)
+		}
+	} else {
+		mw.appState.AppendLog("ERROR", "app", result.LogMessage)
+		if mw.appState.Logger != nil {
+			mw.appState.Logger.Error("%s", result.LogMessage)
+		}
+	}
+
+	// 保存状态到数据库
+	mw.saveSystemProxyState(fullModeName)
+
+	return result.Error
+}
+
+// updateSystemProxyPort 更新系统代理管理器的端口
+func (mw *MainWindow) updateSystemProxyPort() {
+	if mw.appState == nil {
+		return
+	}
+
+	proxyPort := 10080
+	if mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
+		if port := mw.appState.XrayInstance.GetPort(); port > 0 {
+			proxyPort = port
+		}
+	}
+
+	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", proxyPort)
+}
+
+// saveSystemProxyState 保存系统代理状态到数据库
+func (mw *MainWindow) saveSystemProxyState(mode string) {
+	if mw.appState == nil || mw.appState.ConfigService == nil {
+		return
+	}
+	if err := mw.appState.ConfigService.SetSystemProxyMode(mode); err != nil {
+		if mw.appState.Logger != nil {
+			mw.appState.Logger.Error("保存系统代理状态失败: %v", err)
+		}
+	}
+}
+
+// restoreSystemProxyState 从数据库恢复系统代理状态（在应用启动时调用）
+func (mw *MainWindow) restoreSystemProxyState() {
+	if mw.appState == nil || mw.appState.ConfigService == nil {
+		return
+	}
+	mode := mw.appState.ConfigService.GetSystemProxyMode()
+	if mode == "" {
+		return
+	}
+
+	// 应用系统代理模式
+	restoreErr := mw.applySystemProxyMode(mode)
+
+	// 更新下拉框显示文本（使用简短文本）
+	if restoreErr == nil && mw.proxyModeSelect != nil {
+		shortText := mw.getShortModeName(mode)
+		if shortText != "" {
+			mw.proxyModeSelect.SetSelected(shortText)
+		}
+	}
 }
 

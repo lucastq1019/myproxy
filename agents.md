@@ -15,16 +15,133 @@
 cmd/gui/                 # 唯一入口
 internal/
   config/                # 配置定义
-  database/              # SQLite封装
+  database/              # SQLite封装（数据库访问层）
   logging/               # 日志管理
-  ping/                  # 延迟测试
+  model/                 # 数据模型层
+  service/               # 业务逻辑层（Service层）
+  store/                 # 数据访问和绑定管理（Store层）
   subscription/          # 订阅解析
   systemproxy/           # 系统代理（跨平台）
-  ui/                    # Fyne界面组件
+  ui/                    # Fyne界面组件（UI层）
+  utils/                 # 工具函数（延迟测试等）
   xray/                  # xray-core封装
 data/                    # 数据库目录（运行时生成）
 config.json              # 运行时配置
 ```
+
+## 架构设计
+
+### 分层架构
+
+项目采用分层架构，各层职责明确，依赖关系清晰：
+
+```
+┌─────────────────────────────────────┐
+│         UI Layer (ui/)              │  ← 只负责 UI 展示和事件转发
+├─────────────────────────────────────┤
+│      Service Layer (service/)       │  ← 业务逻辑层
+│  - ServerService                    │
+│  - SubscriptionService               │
+│  - ConfigService                     │
+│  - ProxyService                      │
+├─────────────────────────────────────┤
+│      Store Layer (store/)           │  ← 数据访问和绑定管理
+│  - NodesStore                       │
+│  - SubscriptionsStore               │
+│  - ConfigStore                      │
+├─────────────────────────────────────┤
+│   Database Layer (database/)        │  ← 数据库访问
+├─────────────────────────────────────┤
+│      Model Layer (model/)           │  ← 数据模型
+└─────────────────────────────────────┘
+```
+
+### 依赖规则
+
+**严格遵循以下依赖规则**：
+
+1. **UI 层 (ui/)**：
+   - ✅ 可以依赖：Service 层、Store 层、Model 层
+   - ❌ 禁止直接依赖：Database 层
+   - 职责：只负责 UI 展示和事件转发，不包含业务逻辑
+
+2. **Service 层 (service/)**：
+   - ✅ 可以依赖：Store 层、Model 层
+   - ❌ 禁止依赖：UI 层、Database 层（通过 Store 访问）
+   - 职责：包含业务逻辑，协调 Store 层完成业务操作
+
+3. **Store 层 (store/)**：
+   - ✅ 可以依赖：Database 层、Model 层
+   - ❌ 禁止依赖：UI 层、Service 层
+   - 职责：数据访问和双向绑定管理，不包含业务逻辑
+
+4. **Database 层 (database/)**：
+   - ✅ 可以依赖：Model 层
+   - ❌ 禁止依赖：其他任何层
+   - 职责：纯粹的数据库 CRUD 操作
+
+5. **Model 层 (model/)**：
+   - ✅ 不依赖任何层（纯数据结构）
+   - 职责：定义数据模型，供各层使用
+
+6. **工具层 (utils/, subscription/, xray/, systemproxy/)**：
+   - ✅ 可以依赖：Model 层
+   - ❌ 禁止依赖：UI 层、Service 层、Store 层、Database 层
+   - 职责：提供独立的功能模块，不涉及数据更新
+   - 示例：`utils.Ping` 用于延迟测试，`utils.GenerateServerID` 用于生成ID
+
+### 数据访问规则
+
+1. **UI 层数据访问**：
+   - 通过 `AppState.Store` 访问数据
+   - 通过 `AppState.Service` 执行业务操作
+   - ❌ 禁止直接调用 `database` 包
+
+2. **Service 层数据访问**：
+   - 通过 `Store` 层访问数据
+   - ❌ 禁止直接调用 `database` 包
+
+3. **数据更新流程**：
+   ```
+   UI 层 → Service 层 → Store 层 → Database 层
+   ```
+
+4. **数据模型使用**：
+   - 各层统一使用 `model.Node`、`model.Subscription` 等
+   - ❌ 禁止直接使用 `database.Node`（虽然它是别名，但应使用 model 包）
+
+### 重构原则
+
+1. **职责单一原则**：
+   - 每个包/层只负责自己的职责
+   - 例如：`utils.Ping` 只负责延迟测试，不负责数据更新
+
+2. **依赖倒置原则**：
+   - 高层模块不依赖低层模块，都依赖抽象（Model 层）
+   - 通过参数传递数据，而不是在内部获取
+
+3. **数据流向清晰**：
+   - 数据获取：通过参数传入，而不是在内部调用其他层获取
+   - 数据更新：返回结果，由调用者决定如何更新
+
+4. **示例：ping 工具重构**：
+   ```go
+   // ❌ 错误：依赖 Service 层，内部获取数据
+   func (p *Ping) TestAllServersDelay() map[string]int {
+       servers := p.serverService.ListServers()  // 错误：内部获取数据
+       // ...
+   }
+   
+   // ✅ 正确：通过参数传入，只负责测试
+   func (p *Ping) TestAllServersDelay(servers []model.Node) map[string]int {
+       // 只负责测试延迟，不涉及数据更新
+   }
+   ```
+
+5. **构造函数设计**：
+   - 避免在构造函数中传入其他 Service 的依赖
+   - 工具类（如 `utils.Ping`）应该无状态，不需要依赖注入
+   - 如果确实需要依赖，应该通过方法参数传递，而不是结构体字段
 
 ## 启动命令
 
@@ -162,6 +279,13 @@ UI:
 - Fyne框架
 - 组件在 `internal/ui` 包
 - UI逻辑与业务逻辑分离
+- ❌ 禁止直接访问 `database` 包，必须通过 `Store` 或 `Service` 层
+
+架构分层:
+- 严格遵循分层架构和依赖规则
+- 工具类（如 `ping`）应该无状态，不依赖其他 Service
+- 数据通过参数传入，而不是在内部获取
+- 数据更新返回结果，由调用者决定如何更新
 
 并发:
 - UI操作必须在主goroutine

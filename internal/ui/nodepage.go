@@ -8,11 +8,11 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/logging"
+	"myproxy.com/p/internal/model"
 )
 
 // NodePage 管理服务器列表的显示和操作。
@@ -20,6 +20,7 @@ import (
 type NodePage struct {
 	appState       *AppState
 	list           *widget.List        // 列表组件
+	scrollList     *container.Scroll   // 滚动容器
 	content        fyne.CanvasObject   // 内容容器
 
 	// 搜索与过滤相关
@@ -41,6 +42,8 @@ func NewNodePage(appState *AppState) *NodePage {
 		appState.Store.Nodes.NodesBinding.AddListener(binding.NewDataListener(func() {
 			if np.list != nil {
 				np.list.Refresh()
+				// 数据更新后，尝试滚动到选中位置
+				np.scrollToSelected()
 			}
 		}))
 	}
@@ -95,14 +98,14 @@ func (np *NodePage) Build() fyne.CanvasObject {
 	subscriptionBtn.Importance = widget.LowImportance
 
 	// 4. 头部栏布局（返回按钮 + 选中服务器标签 + 操作按钮）
-	// 使用固定宽度的容器限制标签，给标签足够的显示空间
-	labelContainer := container.NewHBox(np.selectedServerLabel)
-	headerBar := container.NewHBox(
-		backBtn,
-		container.NewBorder(nil, nil, nil, nil, labelContainer), // 限制标签宽度，给足够空间显示
-		layout.NewSpacer(),
-		testAllBtn,
-		subscriptionBtn,
+	// 使用 Border 布局让 labelContainer 自动占满剩余空间
+	labelContainer := container.NewPadded(np.selectedServerLabel)
+	rightButtons := container.NewHBox(testAllBtn, subscriptionBtn)
+	headerBar := container.NewBorder(
+		nil, nil, // 上下为空
+		backBtn,  // 左侧：返回按钮
+		rightButtons, // 右侧：操作按钮组
+		labelContainer, // 中间：选中服务器标签（自动占满剩余空间）
 	)
 
 	// 4. 组合头部区域（添加分隔线，移除 padding 降低高度）
@@ -174,7 +177,7 @@ func (np *NodePage) Build() fyne.CanvasObject {
 	)
 
 	// 包装在滚动容器中并设置最小尺寸确保布局占满
-	scrollList := container.NewScroll(np.list)
+	np.scrollList = container.NewScroll(np.list)
 
 	// 8. 组合布局：头部 + 搜索栏 + 表头 + 列表
 	// 移除所有不必要的 padding，降低高度
@@ -186,7 +189,7 @@ func (np *NodePage) Build() fyne.CanvasObject {
 			canvas.NewLine(theme.Color(theme.ColorNameSeparator)),
 		),
 		nil, nil, nil,
-		container.NewPadded(scrollList),
+		container.NewPadded(np.scrollList),
 	)
 
 	return np.content
@@ -198,6 +201,33 @@ func (np *NodePage) Refresh() {
 	np.loadNodes()
 	np.updateSelectedServerLabel() // 更新选中服务器标签
 	// 绑定数据更新后会自动触发列表刷新，无需手动调用
+	if np.list != nil {
+		np.list.Refresh()
+	}
+}
+
+// scrollToSelected 滚动到选中的节点位置
+func (np *NodePage) scrollToSelected() {
+	if np.list == nil || np.appState == nil || np.appState.Store == nil || np.appState.Store.Nodes == nil {
+		return
+	}
+
+	// 获取选中的节点ID
+	selectedID := np.appState.Store.Nodes.GetSelectedID()
+	if selectedID == "" {
+		return
+	}
+
+	// 在过滤后的节点列表中找到选中节点的索引
+	nodes := np.getFilteredNodes()
+	for i, node := range nodes {
+		if node.ID == selectedID {
+			// 滚动到该位置（Fyne v2 的 widget.List 支持 ScrollTo 方法）
+			// 使用 widget.ListItemID 类型（即 int）
+			np.list.ScrollTo(widget.ListItemID(i))
+			return
+		}
+	}
 }
 
 // updateSelectedServerLabel 更新当前选中服务器名标签
@@ -292,7 +322,6 @@ func (np *NodePage) updateNodeItem(id widget.ListItemID, obj fyne.CanvasObject) 
 
 // onNodeSelected 节点选中事件（单击选中）
 func (np *NodePage) onNodeSelected(id widget.ListItemID) {
-	fmt.Println("onNodeSelected: ", id, "panel: ", np)
 	nodes := np.getFilteredNodes()
 	if id < 0 || id >= len(nodes) {
 		return
@@ -313,8 +342,13 @@ func (np *NodePage) onNodeSelected(id widget.ListItemID) {
 	// 更新选中服务器标签
 	np.updateSelectedServerLabel()
 
-	// 刷新列表显示
-	np.Refresh()
+	// 强制刷新列表显示（确保选中状态立即更新）
+	if np.list != nil {
+		np.list.Refresh()
+	}
+	
+	// 滚动到选中位置
+	np.scrollToSelected()
 }
 
 // onRightClick 右键菜单 - 显示操作菜单
@@ -373,7 +407,7 @@ func (np *NodePage) onTestSpeed(id widget.ListItemID) {
 			np.appState.AppendLog("INFO", "ping", fmt.Sprintf("开始测试服务器延迟: %s (%s:%d)", node.Name, node.Addr, node.Port))
 		}
 
-		delay, err := np.appState.PingManager.TestServerDelay(*node)
+		delay, err := np.appState.Ping.TestServerDelay(*node)
 		if err != nil {
 			// 记录失败日志
 			if np.appState != nil {
@@ -410,41 +444,6 @@ func (np *NodePage) onTestSpeed(id widget.ListItemID) {
 		})
 	}()
 }
-
-// onStartProxyFromSelected 从当前选中的服务器启动代理 - 注释功能
-// func (np *NodePage) onStartProxyFromSelected() {
-// 	if np.appState.SelectedServerID == "" {
-// 		np.appState.Window.SetTitle("请先选择一个服务器")
-// 		return
-// 	}
-
-// 	nodes := np.nodes
-// 	var srv *database.Node
-// 	for _, node := range nodes {
-// 		if node.ID == np.appState.SelectedServerID {
-// 			srv = node
-// 			break
-// 		}
-// 	}
-
-// 	if srv == nil {
-// 		np.appState.Window.SetTitle("选中的服务器不存在")
-// 		return
-// 	}
-
-// 	// 如果已有代理在运行，先停止
-// 	if np.appState.XrayInstance != nil {
-// 		np.appState.XrayInstance.Stop()
-// 		np.appState.XrayInstance = nil
-// 	}
-
-// 	// 把当前的设置为选中
-// 	np.appState.ServerManager.SelectServer(srv.ID)
-// 	np.appState.SelectedServerID = srv.ID
-
-// 	// 启动代理
-// 	np.startProxyWithServer(srv)
-// }
 
 // onStartProxy 启动代理（右键菜单使用）
 func (np *NodePage) onStartProxy(id widget.ListItemID) {
@@ -644,11 +643,20 @@ func (np *NodePage) onTestAll() {
 		// 记录开始测速日志
 		if np.appState != nil {
 			np.appState.AppendLog("INFO", "ping", fmt.Sprintf("开始一键测速，共 %d 个启用的服务器", enabledCount))
-		} 
+		}
 
-		results := np.appState.PingManager.TestAllServersDelay()
+		// 转换为 model.Node 列表
+		serverList := make([]model.Node, 0, len(servers))
+		for _, s := range servers {
+			if s != nil && s.Enabled {
+				serverList = append(serverList, *s)
+			}
+		}
 
-		// 统计结果并记录每个服务器的详细日志
+		// 测试所有服务器延迟
+		results := np.appState.Ping.TestAllServersDelay(serverList)
+
+		// 统计结果并记录每个服务器的详细日志，同时更新延迟
 		successCount := 0
 		failCount := 0
 		for _, srv := range servers {
@@ -661,6 +669,14 @@ func (np *NodePage) onTestAll() {
 			}
 			if delay > 0 {
 				successCount++
+				// 通过 Store 更新服务器延迟（会自动更新数据库和绑定）
+				if np.appState != nil && np.appState.Store != nil && np.appState.Store.Nodes != nil {
+					if err := np.appState.Store.Nodes.UpdateDelay(srv.ID, delay); err != nil {
+						if np.appState != nil {
+							np.appState.AppendLog("ERROR", "ping", fmt.Sprintf("更新服务器 %s 延迟失败: %v", srv.Name, err))
+						}
+					}
+				}
 				if np.appState != nil {
 					np.appState.AppendLog("INFO", "ping", fmt.Sprintf("服务器 %s (%s:%d) 测速完成: %d ms", srv.Name, srv.Addr, srv.Port, delay))
 				}
@@ -762,7 +778,6 @@ func (s *ServerListItem) CreateRenderer() fyne.WidgetRenderer {
 
 // Tapped 处理单击事件 - 选中服务器
 func (s *ServerListItem) Tapped(pe *fyne.PointEvent) {
-	fmt.Println("Tapped: ", s.id, "panel: ", s.panel)
 	if s.panel == nil {
 		return
 	}

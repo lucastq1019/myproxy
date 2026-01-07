@@ -15,7 +15,6 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/fsnotify/fsnotify"
-	"myproxy.com/p/internal/database"
 )
 
 // LogEntry 表示一条日志条目
@@ -61,14 +60,9 @@ func NewLogsPanel(appState *AppState) *LogsPanel {
 		isCollapsed:   true, // 默认折叠，符合“默认隐藏，需要时深入”的设计
 	}
 
-	// 从数据库加载折叠状态（优先用户之前的选择）
-	if collapsed, err := database.GetAppConfig("logsCollapsed"); err == nil {
-		// "true" -> 折叠; "false" -> 展开; 其他值保持默认
-		if collapsed == "true" {
-			lp.isCollapsed = true
-		} else if collapsed == "false" {
-			lp.isCollapsed = false
-		}
+	// 从 ConfigService 加载折叠状态（优先用户之前的选择）
+	if appState != nil && appState.ConfigService != nil {
+		lp.isCollapsed = appState.ConfigService.GetLogsCollapsed()
 	}
 
 	// 日志内容 - 使用 RichText 以支持自定义文本颜色
@@ -188,14 +182,12 @@ func (lp *LogsPanel) toggleCollapse() {
 	lp.updateCollapseState()
 	lp.updateCollapseButtonText()
 	
-	// 保存状态到数据库
-	state := "false"
-	if lp.isCollapsed {
-		state = "true"
-	}
-	if err := database.SetAppConfig("logsCollapsed", state); err != nil {
-		if lp.appState != nil && lp.appState.Logger != nil {
-			lp.appState.Logger.Error("保存日志折叠状态失败: %v", err)
+	// 保存状态到数据库（通过 ConfigService）
+	if lp.appState != nil && lp.appState.ConfigService != nil {
+		if err := lp.appState.ConfigService.SetLogsCollapsed(lp.isCollapsed); err != nil {
+			if lp.appState.Logger != nil {
+				lp.appState.Logger.Error("保存日志折叠状态失败: %v", err)
+			}
 		}
 	}
 	

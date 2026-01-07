@@ -13,7 +13,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
-	"myproxy.com/p/internal/database"
 )
 
 var (
@@ -37,7 +36,9 @@ func getIconDir() string {
 }
 
 // createAppIcon 创建应用图标资源（用于窗口图标，228x228）
-func createAppIcon() fyne.Resource {
+// 参数：
+//   - appState: 应用状态（用于获取主题配置）
+func createAppIcon(appState *AppState) fyne.Resource {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
 
@@ -45,12 +46,14 @@ func createAppIcon() fyne.Resource {
 		return appIconCache
 	}
 
-	appIconCache = createLShapeIcon(228, "app-icon.png")
+	appIconCache = createLShapeIcon(228, "app-icon.png", appState)
 	return appIconCache
 }
 
 // createTrayIconResource 创建系统托盘图标资源（32x32，L形布局）
-func createTrayIconResource() fyne.Resource {
+// 参数：
+//   - appState: 应用状态（用于获取主题配置）
+func createTrayIconResource(appState *AppState) fyne.Resource {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
 
@@ -58,14 +61,16 @@ func createTrayIconResource() fyne.Resource {
 		return trayIconCache
 	}
 
-	trayIconCache = createLShapeIcon(32, "tray-icon.png")
+	trayIconCache = createLShapeIcon(32, "tray-icon.png", appState)
 	return trayIconCache
 }
 
 // createLShapeIcon 创建下L形布局的图标（使用水滴形状）
-// size: 图标尺寸（正方形）
-// name: 资源名称
-func createLShapeIcon(size int, name string) fyne.Resource {
+// 参数：
+//   - size: 图标尺寸（正方形）
+//   - name: 资源名称
+//   - appState: 应用状态（用于获取主题配置）
+func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 	// 检查文件是否已存在
 	iconDir := getIconDir()
 	iconPath := filepath.Join(iconDir, name)
@@ -80,10 +85,12 @@ func createLShapeIcon(size int, name string) fyne.Resource {
 	}
 
 	// 从主题获取背景色
-	// 从数据库读取主题配置，默认使用黑色主题
+	// 从 ConfigService 读取主题配置，默认使用黑色主题
 	themeVariant := theme.VariantDark
-	if themeStr, err := database.GetAppConfigWithDefault("theme", "dark"); err == nil && themeStr == "light" {
-		themeVariant = theme.VariantLight
+	if appState != nil && appState.ConfigService != nil {
+		if themeStr := appState.ConfigService.GetTheme(); themeStr == "light" {
+			themeVariant = theme.VariantLight
+		}
 	}
 	
 	// 创建主题实例并使用 Color 方法获取背景色

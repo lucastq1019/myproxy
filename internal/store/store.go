@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/data/binding"
 	"myproxy.com/p/internal/database"
+	"myproxy.com/p/internal/subscription"
 )
 
 // Store 是数据层的核心，管理所有应用数据和双向绑定。
@@ -28,14 +29,18 @@ type Store struct {
 
 // NewStore 创建新的 Store 实例并初始化所有子 Store。
 // 注意：不会自动加载数据，需要在 Fyne 应用初始化后调用 LoadAll()。
+// 参数：
+//   - subscriptionManager: 订阅管理器，用于订阅更新操作（可为 nil，但订阅更新功能将不可用）
 // 返回：初始化后的 Store 实例
-func NewStore() *Store {
+func NewStore(subscriptionManager *subscription.SubscriptionManager) *Store {
 	s := &Store{
-		Nodes:      NewNodesStore(),
-		Subscriptions: NewSubscriptionsStore(),
-		Layout:     NewLayoutStore(),
-		AppConfig:  NewAppConfigStore(),
+		Nodes:         NewNodesStore(),
+		Subscriptions: NewSubscriptionsStore(subscriptionManager),
+		Layout:        NewLayoutStore(),
+		AppConfig:     NewAppConfigStore(),
 	}
+	// 设置 SubscriptionsStore 的父 Store 引用
+	s.Subscriptions.setParentStore(s)
 	return s
 }
 
@@ -165,15 +170,35 @@ type SubscriptionsStore struct {
 
 	// 订阅标签绑定（用于状态面板显示）
 	LabelsBinding binding.StringList
+
+	// 订阅管理器引用，用于订阅更新操作
+	subscriptionManager *subscription.SubscriptionManager
+
+	// 父 Store 引用，用于在订阅更新后同时刷新节点数据
+	parentStore *Store
 }
 
 // NewSubscriptionsStore 创建新的 SubscriptionsStore 实例。
-func NewSubscriptionsStore() *SubscriptionsStore {
+// 参数：
+//   - subscriptionManager: 订阅管理器，用于订阅更新操作（可为 nil）
+func NewSubscriptionsStore(subscriptionManager *subscription.SubscriptionManager) *SubscriptionsStore {
 	return &SubscriptionsStore{
 		subscriptions:        make([]*database.Subscription, 0),
 		SubscriptionsBinding: binding.NewUntypedList(),
 		LabelsBinding:        binding.NewStringList(),
+		subscriptionManager: subscriptionManager,
+		parentStore:          nil, // 将在 Store 创建后设置
 	}
+}
+
+// setParentStore 设置父 Store 引用（内部方法，由 Store 调用）
+func (ss *SubscriptionsStore) setParentStore(parent *Store) {
+	ss.parentStore = parent
+}
+
+// SetSubscriptionManager 设置订阅管理器引用（用于延迟设置）
+func (ss *SubscriptionsStore) SetSubscriptionManager(subscriptionManager *subscription.SubscriptionManager) {
+	ss.subscriptionManager = subscriptionManager
 }
 
 // Load 从数据库加载所有订阅到 Store。
@@ -270,6 +295,70 @@ func (ss *SubscriptionsStore) Delete(id int64) error {
 // GetServerCount 获取订阅下的服务器数量。
 func (ss *SubscriptionsStore) GetServerCount(id int64) (int, error) {
 	return database.GetServerCountBySubscriptionID(id)
+}
+
+// UpdateByID 根据订阅 ID 更新订阅（拉取最新内容）。
+// 注意：此方法已废弃，业务逻辑已移至 SubscriptionService。
+// 保留此方法仅用于向后兼容，建议使用 SubscriptionService.UpdateByID。
+// 参数：
+//   - id: 订阅 ID
+// 返回：错误（如果有）
+func (ss *SubscriptionsStore) UpdateByID(id int64) error {
+	if ss.subscriptionManager == nil {
+		return fmt.Errorf("订阅管理器未初始化，无法更新订阅")
+	}
+	
+	// 调用 SubscriptionManager 更新订阅（会更新数据库中的订阅和节点）
+	if err := ss.subscriptionManager.UpdateSubscriptionByID(id); err != nil {
+		return fmt.Errorf("更新订阅失败: %w", err)
+	}
+	
+	// 更新后重新加载订阅数据
+	if err := ss.Load(); err != nil {
+		return fmt.Errorf("刷新订阅数据失败: %w", err)
+	}
+	
+	// 同时刷新节点数据（因为订阅更新会添加/更新节点）
+	if ss.parentStore != nil && ss.parentStore.Nodes != nil {
+		if err := ss.parentStore.Nodes.Load(); err != nil {
+			return fmt.Errorf("刷新节点数据失败: %w", err)
+		}
+	}
+	
+	return nil
+}
+
+// Fetch 从 URL 获取订阅服务器列表并保存。
+// 注意：此方法已废弃，业务逻辑已移至 SubscriptionService。
+// 保留此方法仅用于向后兼容，建议使用 SubscriptionService.Fetch。
+// 参数：
+//   - url: 订阅 URL
+//   - label: 订阅标签（可选）
+// 返回：错误（如果有）
+func (ss *SubscriptionsStore) Fetch(url string, label ...string) error {
+	if ss.subscriptionManager == nil {
+		return fmt.Errorf("订阅管理器未初始化，无法获取订阅")
+	}
+	
+	// 调用 SubscriptionManager 获取订阅（会更新数据库中的订阅和节点）
+	_, err := ss.subscriptionManager.FetchSubscription(url, label...)
+	if err != nil {
+		return fmt.Errorf("获取订阅失败: %w", err)
+	}
+	
+	// 获取后重新加载订阅数据
+	if err := ss.Load(); err != nil {
+		return fmt.Errorf("刷新订阅数据失败: %w", err)
+	}
+	
+	// 同时刷新节点数据（因为订阅获取会添加节点）
+	if ss.parentStore != nil && ss.parentStore.Nodes != nil {
+		if err := ss.parentStore.Nodes.Load(); err != nil {
+			return fmt.Errorf("刷新节点数据失败: %w", err)
+		}
+	}
+	
+	return nil
 }
 
 // LayoutStore 管理布局配置数据。

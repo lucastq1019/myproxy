@@ -147,6 +147,12 @@ func (sp *SubscriptionPage) showAddSubscriptionDialog() {
 					fyne.Do(func() { dialog.ShowError(err, sp.appState.Window) })
 					return
 				}
+
+				// 立即执行一次抓取（通过 Store）
+				if err := sp.appState.Store.Subscriptions.Fetch(urlEntry.Text, labelEntry.Text); err != nil {
+					fyne.Do(func() { dialog.ShowError(err, sp.appState.Window) })
+					return
+				}
 			} else {
 				// 降级方案：直接调用数据库
 				_, err := database.AddOrUpdateSubscription(urlEntry.Text, labelEntry.Text)
@@ -154,11 +160,6 @@ func (sp *SubscriptionPage) showAddSubscriptionDialog() {
 					fyne.Do(func() { dialog.ShowError(err, sp.appState.Window) })
 					return
 				}
-			}
-
-			// 立即执行一次抓取
-			if sp.appState != nil && sp.appState.subscriptionManager != nil {
-				sp.appState.subscriptionManager.FetchSubscription(urlEntry.Text, labelEntry.Text)
 			}
 
 			// 更新绑定数据，自动刷新 UI
@@ -188,8 +189,8 @@ func (sp *SubscriptionPage) batchUpdateSubscriptions() {
 				subscriptions = sp.appState.Store.Subscriptions.GetAll()
 			}
 			for _, sub := range subscriptions {
-				if sp.appState != nil && sp.appState.subscriptionManager != nil {
-					if err := sp.appState.subscriptionManager.UpdateSubscriptionByID(sub.ID); err != nil {
+				if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.Subscriptions != nil {
+					if err := sp.appState.Store.Subscriptions.UpdateByID(sub.ID); err != nil {
 						fyne.Do(func() {
 							dialog.ShowError(fmt.Errorf("更新订阅失败: %w", err), sp.appState.Window)
 						})
@@ -303,18 +304,14 @@ func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	card.updateBtn.OnTapped = func() {
 		card.updateBtn.Disable()
 		go func() {
-			if card.page != nil && card.page.appState != nil && card.page.appState.subscriptionManager != nil {
-				if err := card.page.appState.subscriptionManager.UpdateSubscriptionByID(sub.ID); err != nil {
+			if card.page != nil && card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
+				if err := card.page.appState.Store.Subscriptions.UpdateByID(sub.ID); err != nil {
 					fyne.Do(func() {
 						card.updateBtn.Enable()
 						dialog.ShowError(fmt.Errorf("更新订阅失败: %w", err), card.page.appState.Window)
 					})
 					return
 				}
-			}
-			// 重新加载 Store 数据（会自动更新绑定）
-			if card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
-				_ = card.page.appState.Store.Subscriptions.Load()
 			}
 			// 更新绑定数据，自动刷新 UI
 			fyne.Do(func() {

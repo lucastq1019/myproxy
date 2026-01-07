@@ -13,20 +13,21 @@ import (
 	"time"
 
 	"myproxy.com/p/internal/database"
-	"myproxy.com/p/internal/server"
+	"myproxy.com/p/internal/model"
+	"myproxy.com/p/internal/utils"
 )
 
 // ServerParser 服务器配置解析器接口
 type ServerParser interface {
 	// Parse 解析服务器配置字符串，返回服务器配置和错误
-	Parse(content string) (*database.Node, error)
+	Parse(content string) (*model.Node, error)
 }
 
 // VMessParser VMess协议解析器
 type VMessParser struct{}
 
 // Parse 解析VMess协议
-func (p *VMessParser) Parse(content string) (*database.Node, error) {
+func (p *VMessParser) Parse(content string) (*model.Node, error) {
 	// 移除前缀
 	vmessData := strings.TrimPrefix(content, "vmess://")
 	// 解码Base64
@@ -75,10 +76,10 @@ func (p *VMessParser) Parse(content string) (*database.Node, error) {
 	}
 
 	// 生成服务器ID（使用 addr:port:uuid）
-	serverID := server.GenerateServerID(vmessConfig.Add, port, vmessConfig.Id)
+	serverID := utils.GenerateServerID(vmessConfig.Add, port, vmessConfig.Id)
 
 	// 创建服务器配置，包含所有字段
-	s := &database.Node{
+	s := &model.Node{
 		ID:           serverID,
 		Name:         vmessConfig.Ps,
 		Addr:         vmessConfig.Add,
@@ -125,7 +126,7 @@ type SSConfig struct {
 type SSParser struct{}
 
 // Parse 解析SS协议
-func (p *SSParser) Parse(content string) (*database.Node, error) {
+func (p *SSParser) Parse(content string) (*model.Node, error) {
 	// 移除前缀
 	ssData := strings.TrimPrefix(content, "ss://")
 
@@ -216,10 +217,10 @@ func (p *SSParser) Parse(content string) (*database.Node, error) {
 	}
 
 	// 生成服务器ID
-	serverID := server.GenerateServerID(addr, port, password)
+	serverID := utils.GenerateServerID(addr, port, password)
 
 	// 创建服务器配置
-	s := &database.Node{
+	s := &model.Node{
 		ID:           serverID,
 		Name:         fmt.Sprintf("%s:%d", addr, port),
 		Addr:         addr,
@@ -265,7 +266,7 @@ type TrojanConfig struct {
 type TrojanParser struct{}
 
 // Parse 解析Trojan协议
-func (p *TrojanParser) Parse(content string) (*database.Node, error) {
+func (p *TrojanParser) Parse(content string) (*model.Node, error) {
 	// 移除前缀
 	trojanData := strings.TrimPrefix(content, "trojan://")
 
@@ -325,10 +326,10 @@ func (p *TrojanParser) Parse(content string) (*database.Node, error) {
 	}
 
 	// 生成服务器ID
-	serverID := server.GenerateServerID(addr, port, password)
+	serverID := utils.GenerateServerID(addr, port, password)
 
 	// 创建服务器配置
-	s := &database.Node{
+	s := &model.Node{
 		ID:           serverID,
 		Name:         name,
 		Addr:         addr,
@@ -360,7 +361,7 @@ func (p *TrojanParser) Parse(content string) (*database.Node, error) {
 type SOCKS5Parser struct{}
 
 // Parse 解析SOCKS5协议
-func (p *SOCKS5Parser) Parse(content string) (*database.Node, error) {
+func (p *SOCKS5Parser) Parse(content string) (*model.Node, error) {
 	socks5Regex := regexp.MustCompile(`^socks5://(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$`)
 	matches := socks5Regex.FindStringSubmatch(content)
 	if matches == nil {
@@ -378,10 +379,10 @@ func (p *SOCKS5Parser) Parse(content string) (*database.Node, error) {
 	}
 
 	// 生成服务器ID
-	serverID := server.GenerateServerID(addr, port, username)
+	serverID := utils.GenerateServerID(addr, port, username)
 
 	// 创建服务器配置
-	s := &database.Node{
+	s := &model.Node{
 		ID:           serverID,
 		Name:         fmt.Sprintf("%s:%d", addr, port),
 		Addr:         addr,
@@ -402,7 +403,7 @@ func (p *SOCKS5Parser) Parse(content string) (*database.Node, error) {
 type SimpleParser struct{}
 
 // Parse 解析简单格式
-func (p *SimpleParser) Parse(content string) (*database.Node, error) {
+func (p *SimpleParser) Parse(content string) (*model.Node, error) {
 	simpleRegex := regexp.MustCompile(`^([^:]+):(\d+)\s+([^\s]+)\s+([^\s]+)$`)
 	matches := simpleRegex.FindStringSubmatch(content)
 	if matches == nil {
@@ -420,10 +421,10 @@ func (p *SimpleParser) Parse(content string) (*database.Node, error) {
 	}
 
 	// 生成服务器ID
-	serverID := server.GenerateServerID(addr, port, username)
+	serverID := utils.GenerateServerID(addr, port, username)
 
 	// 创建服务器配置
-	s := &database.Node{
+	s := &model.Node{
 		ID:           serverID,
 		Name:         fmt.Sprintf("%s:%d", addr, port),
 		Addr:         addr,
@@ -441,15 +442,14 @@ func (p *SimpleParser) Parse(content string) (*database.Node, error) {
 }
 
 // SubscriptionManager 订阅管理器
+// 注意：不再维护订阅列表缓存，数据统一由 Store 管理
 type SubscriptionManager struct {
-	serverManager *server.ServerManager
-	client        *http.Client
-	parsers       map[string]ServerParser  // 服务器配置解析器映射，key为协议前缀
-	subscriptions []*database.Subscription // 订阅列表
+	client  *http.Client
+	parsers map[string]ServerParser  // 服务器配置解析器映射，key为协议前缀
 }
 
 // NewSubscriptionManager 创建新的订阅管理器
-func NewSubscriptionManager(serverManager *server.ServerManager) *SubscriptionManager {
+func NewSubscriptionManager() *SubscriptionManager {
 	// 注册所有支持的解析器
 	parsers := make(map[string]ServerParser)
 	parsers["vmess://"] = &VMessParser{}
@@ -458,38 +458,18 @@ func NewSubscriptionManager(serverManager *server.ServerManager) *SubscriptionMa
 	parsers["socks5://"] = &SOCKS5Parser{}
 
 	sm := &SubscriptionManager{
-		serverManager: serverManager,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		parsers: parsers,
 	}
 
-	// 初始化时从数据库加载订阅列表
-	sm.LoadSubscriptionsFromDB()
-
 	return sm
-}
-
-// LoadSubscriptionsFromDB 从数据库加载订阅列表到内存
-func (sm *SubscriptionManager) LoadSubscriptionsFromDB() error {
-	subscriptions, err := database.GetAllSubscriptions()
-	if err != nil {
-		return fmt.Errorf("加载订阅列表失败: %w", err)
-	}
-
-	sm.subscriptions = subscriptions
-	return nil
-}
-
-// GetSubscriptions 获取所有订阅列表
-func (sm *SubscriptionManager) GetSubscriptions() []*database.Subscription {
-	return sm.subscriptions
 }
 
 // FetchSubscription 从URL获取订阅服务器列表
 // label 参数用于为订阅添加标签，如果为空则使用默认标签
-func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([]database.Node, error) {
+func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([]model.Node, error) {
 	// 发送HTTP请求获取订阅内容
 	resp, err := sm.client.Get(url)
 	if err != nil {
@@ -527,14 +507,17 @@ func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([
 	}
 
 	for _, s := range servers {
+		// 检查服务器是否已存在，保留选中状态和延迟
+		existingServer, err := database.GetServer(s.ID)
+		if err == nil && existingServer != nil {
+			// 服务器已存在，保留选中状态和延迟
+			s.Selected = existingServer.Selected
+			s.Delay = existingServer.Delay
+		}
+
 		if err := database.AddOrUpdateServer(s, subscriptionID); err != nil {
 			return nil, fmt.Errorf("保存服务器到数据库失败: %w", err)
 		}
-	}
-
-	// 更新内存中的订阅列表
-	if err := sm.LoadSubscriptionsFromDB(); err != nil {
-		return nil, fmt.Errorf("更新订阅列表失败: %w", err)
 	}
 
 	return servers, nil
@@ -555,14 +538,34 @@ func (sm *SubscriptionManager) UpdateSubscription(url string, label ...string) e
 		}
 	}
 
-	// 获取现有订阅（用于清理旧服务器）
+	// 获取现有订阅（用于清理旧服务器和保存状态）
 	existingSub, err := database.GetSubscriptionByURL(url)
 	if err != nil {
 		return fmt.Errorf("获取订阅信息失败: %w", err)
 	}
 
-	// 如果存在旧订阅，先清理该订阅下的服务器，避免更新后重复累加
+	// 如果存在旧订阅，先保存现有服务器的状态（Selected 和 Delay）
+	// 这样在清理后重新保存时能恢复状态
+	serverStates := make(map[string]struct {
+		Selected bool
+		Delay    int
+	})
 	if existingSub != nil {
+		// 获取该订阅下的所有服务器
+		existingServers, err := database.GetServersBySubscriptionID(existingSub.ID)
+		if err == nil {
+			for _, s := range existingServers {
+				serverStates[s.ID] = struct {
+					Selected bool
+					Delay    int
+				}{
+					Selected: s.Selected,
+					Delay:    s.Delay,
+				}
+			}
+		}
+
+		// 清理该订阅下的旧服务器
 		if err := database.DeleteServersBySubscriptionID(existingSub.ID); err != nil {
 			return fmt.Errorf("清理旧订阅服务器失败: %w", err)
 		}
@@ -585,33 +588,19 @@ func (sm *SubscriptionManager) UpdateSubscription(url string, label ...string) e
 		subscriptionID = &sub.ID
 	}
 
-	// 更新服务器列表（同时更新内存和数据库）
+	// 更新服务器列表，恢复之前保存的状态
 	for _, s := range servers {
-		// 检查服务器是否已存在（从数据库）
-		existingServer, err := database.GetServer(s.ID)
-		if err == nil {
-			// 服务器已存在，保留选中状态和延迟
-			s.Selected = existingServer.Selected
-			s.Delay = existingServer.Delay
+		// 如果之前保存了状态，恢复它
+		if state, ok := serverStates[s.ID]; ok {
+			s.Selected = state.Selected
+			s.Delay = state.Delay
 		}
 
-		// 更新数据库中的服务器信息
+		// 更新数据库中的服务器信息（确保 subscriptionID 正确关联）
+		// 注意：Store 会在订阅更新后自动刷新节点数据（通过 parentStore）
 		if err := database.AddOrUpdateServer(s, subscriptionID); err != nil {
 			return fmt.Errorf("更新服务器到数据库失败: %w", err)
 		}
-
-		// 同时更新内存中的服务器信息（保持兼容性）
-		if err := sm.serverManager.UpdateServer(s); err != nil {
-			// 如果内存中不存在，则添加
-			if err := sm.serverManager.AddServer(s); err != nil {
-				return fmt.Errorf("更新服务器到内存失败: %w", err)
-			}
-		}
-	}
-
-	// 更新内存中的订阅列表
-	if err := sm.LoadSubscriptionsFromDB(); err != nil {
-		return fmt.Errorf("更新订阅列表失败: %w", err)
 	}
 
 	return nil
@@ -638,7 +627,7 @@ func (sm *SubscriptionManager) UpdateSubscriptionByID(id int64) error {
 }
 
 // parseSubscription 解析订阅内容
-func (sm *SubscriptionManager) parseSubscription(content string) ([]database.Node, error) {
+func (sm *SubscriptionManager) parseSubscription(content string) ([]model.Node, error) {
 	// 尝试解码Base64
 	decoded, err := base64.StdEncoding.DecodeString(content)
 	if err == nil {
@@ -656,11 +645,11 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]database.Nod
 
 	if err := json.Unmarshal([]byte(content), &jsonServers); err == nil {
 		// JSON格式解析成功
-		servers := make([]database.Node, len(jsonServers))
+		servers := make([]model.Node, len(jsonServers))
 		for i, js := range jsonServers {
 			rawConfig, _ := json.Marshal(js)
-			servers[i] = database.Node{
-				ID:           server.GenerateServerID(js.Addr, js.Port, js.Username),
+			servers[i] = model.Node{
+				ID:           utils.GenerateServerID(js.Addr, js.Port, js.Username),
 				Name:         js.Name,
 				Addr:         js.Addr,
 				Port:         js.Port,
@@ -678,7 +667,7 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]database.Nod
 
 	// 2. 尝试Clash格式 (每行一个服务器配置)
 	lines := strings.Split(content, "\n")
-	var servers []database.Node
+	var servers []model.Node
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -693,16 +682,18 @@ func (sm *SubscriptionManager) parseSubscription(content string) ([]database.Nod
 		}
 
 		// 使用注册的解析器解析服务器配置
-		var parsedServer *database.Node
+		var parsedServer *model.Node
 
 		// 直接根据前缀获取解析器
 		// 查找字符串中第一个 "://" 出现的位置
 		if idx := strings.Index(line, "://"); idx != -1 {
 			// 提取前缀（包括 "://"）
 			prefix := line[:idx+3]
+			fmt.Println("prefix", prefix)
 			// 从 map 中获取对应的解析器
 			if parser, ok := sm.parsers[prefix]; ok {
 				parsedServer, err = parser.Parse(line)
+				fmt.Println("parsedServer", parsedServer)
 			}
 		}
 
