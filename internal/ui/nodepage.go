@@ -13,6 +13,8 @@ import (
 	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/logging"
 	"myproxy.com/p/internal/model"
+	"myproxy.com/p/internal/service"
+	"myproxy.com/p/internal/xray"
 )
 
 // NodePage 管理服务器列表的显示和操作。
@@ -349,6 +351,13 @@ func (np *NodePage) onNodeSelected(id widget.ListItemID) {
 	
 	// 滚动到选中位置
 	np.scrollToSelected()
+	
+	// 更新主界面的节点信息显示（使用双向绑定，只需更新绑定数据，UI 会自动更新）
+	if np.appState != nil {
+		// 更新绑定数据（serverNameLabel 会自动更新，因为使用了双向绑定）
+		np.appState.UpdateProxyStatus()
+		// 注意：不再显示延迟，已从节点信息区域移除
+	}
 }
 
 // onRightClick 右键菜单 - 显示操作菜单
@@ -455,12 +464,6 @@ func (np *NodePage) onStartProxy(id widget.ListItemID) {
 	// 先选中该节点
 	np.onNodeSelected(id)
 
-	// 如果已有代理在运行，先停止
-	if np.appState.XrayInstance != nil {
-		np.appState.XrayInstance.Stop()
-		np.appState.XrayInstance = nil
-	}
-
 	// 启动代理（使用 StartProxyForSelected 方法）
 	np.StartProxyForSelected()
 }
@@ -550,10 +553,107 @@ func (np *NodePage) onStartProxy(id widget.ListItemID) {
 // 	np.saveConfigToDB()
 // }
 
-// StartProxyForSelected 对外暴露的"启动当前选中服务器"接口，供主界面一键按钮等复用。
-// 内部直接复用现有 onStartProxyFromSelected 逻辑，避免重复实现。
+// StartProxyForSelected 启动当前选中服务器的代理。
+// 根据架构规范，xray 是工具层，实例生命周期 = 代理运行生命周期。
+// 启动代理时创建实例，切换节点时销毁旧实例并创建新实例，停止代理时销毁实例。
 func (np *NodePage) StartProxyForSelected() {
-	// np.onStartProxyFromSelected()
+	// 获取当前选中的节点
+	selectedNode := np.appState.Store.Nodes.GetSelected()
+	if selectedNode == nil {
+		np.logAndShowError("启动代理失败", fmt.Errorf("未选中服务器"))
+		return
+	}
+
+	// 如果已有代理在运行，先停止并销毁实例
+	if np.appState.XrayInstance != nil {
+		if np.appState.XrayInstance.IsRunning() {
+			_ = np.appState.XrayInstance.Stop()
+		}
+		// 销毁实例（生命周期 = 代理运行生命周期）
+		np.appState.XrayInstance = nil
+	}
+
+	// 使用固定的10080端口监听本地SOCKS5
+	proxyPort := 10080
+
+	// 记录开始启动日志
+	if np.appState != nil {
+		np.appState.AppendLog("INFO", "xray", fmt.Sprintf("开始启动xray-core代理: %s", selectedNode.Name))
+	}
+
+	// 使用统一的日志文件路径（与应用日志使用同一个文件）
+	unifiedLogPath := ""
+	if np.appState != nil && np.appState.Logger != nil {
+		unifiedLogPath = np.appState.Logger.GetLogFilePath()
+	}
+
+	// 创建xray配置，设置日志文件路径为统一日志文件
+	xrayConfigJSON, err := xray.CreateXrayConfig(proxyPort, selectedNode, unifiedLogPath)
+	if err != nil {
+		np.logAndShowError("创建xray配置失败", err)
+		np.appState.UpdateProxyStatus()
+		return
+	}
+
+	// 记录配置创建成功日志
+	if np.appState != nil {
+		np.appState.AppendLog("DEBUG", "xray", fmt.Sprintf("xray配置已创建: %s", selectedNode.Name))
+	}
+
+	// 创建日志回调函数，将 xray 日志转发到应用日志系统
+	logCallback := func(level, message string) {
+		if np.appState != nil {
+			np.appState.AppendLog(level, "xray", message)
+		}
+	}
+
+	// 创建xray实例，并设置日志回调（每次配置变化都需要重新创建实例）
+	xrayInstance, err := xray.NewXrayInstanceFromJSONWithCallback(xrayConfigJSON, logCallback)
+	if err != nil {
+		np.logAndShowError("创建xray实例失败", err)
+		np.appState.UpdateProxyStatus()
+		return
+	}
+
+	// 启动xray实例
+	err = xrayInstance.Start()
+	if err != nil {
+		np.logAndShowError("启动xray实例失败", err)
+		np.appState.UpdateProxyStatus()
+		return
+	}
+
+	// 启动成功，设置端口信息
+	xrayInstance.SetPort(proxyPort)
+	// 将实例保存到 AppState（临时持有，生命周期 = 代理运行生命周期）
+	np.appState.XrayInstance = xrayInstance
+
+	// 更新 ProxyService 的 xray 实例引用
+	if np.appState.ProxyService != nil {
+		np.appState.ProxyService.UpdateXrayInstance(xrayInstance)
+	} else {
+		// 延迟初始化 ProxyService
+		np.appState.ProxyService = service.NewProxyService(xrayInstance)
+	}
+
+	// 记录日志（统一日志记录）
+	if np.appState.Logger != nil {
+		np.appState.Logger.InfoWithType(logging.LogTypeProxy, "xray-core代理已启动: %s (端口: %d)", selectedNode.Name, proxyPort)
+	}
+
+	// 追加日志到日志面板
+	if np.appState != nil {
+		np.appState.AppendLog("INFO", "xray", fmt.Sprintf("xray-core代理已启动: %s (端口: %d)", selectedNode.Name, proxyPort))
+		np.appState.AppendLog("INFO", "xray", fmt.Sprintf("服务器信息: %s:%d, 协议: %s", selectedNode.Addr, selectedNode.Port, selectedNode.ProtocolType))
+	}
+
+	np.Refresh()
+	// 更新状态绑定（使用双向绑定，UI 会自动更新）
+	np.appState.UpdateProxyStatus()
+
+	if np.appState.Window != nil {
+		np.appState.Window.SetTitle(fmt.Sprintf("代理已启动: %s (端口: %d)", selectedNode.Name, proxyPort))
+	}
 }
 
 // logAndShowError 记录日志并显示错误对话框（统一错误处理）
@@ -572,23 +672,27 @@ func (np *NodePage) saveConfigToDB() {
 	// 如果需要保存特定配置，应该通过 Store.AppConfig.Set() 方法
 }
 
-// onStopProxy 停止代理 - 注释功能
+// onStopProxy 停止代理。
+// 根据架构规范，xray 实例生命周期 = 代理运行生命周期，停止代理时销毁实例。
 func (np *NodePage) onStopProxy() {
 	stopped := false
 
-	// 停止xray实例
+	// 停止并销毁xray实例（生命周期 = 代理运行生命周期）
 	if np.appState.XrayInstance != nil {
-		if np.appState != nil {
-			np.appState.AppendLog("INFO", "xray", "正在停止xray-core代理...")
+		if np.appState.XrayInstance.IsRunning() {
+			if np.appState != nil {
+				np.appState.AppendLog("INFO", "xray", "正在停止xray-core代理...")
+			}
+
+			err := np.appState.XrayInstance.Stop()
+			if err != nil {
+				// 停止失败，记录日志并显示错误（统一错误处理）
+				np.logAndShowError("停止xray代理失败", err)
+				return
+			}
 		}
 
-		err := np.appState.XrayInstance.Stop()
-		if err != nil {
-			// 停止失败，记录日志并显示错误（统一错误处理）
-			np.logAndShowError("停止xray代理失败", err)
-			return
-		}
-
+		// 销毁实例（生命周期 = 代理运行生命周期）
 		np.appState.XrayInstance = nil
 		stopped = true
 
@@ -610,12 +714,13 @@ func (np *NodePage) onStopProxy() {
 		// 更新状态绑定
 		np.appState.UpdateProxyStatus()
 
-		// 保存配置到数据库
-		np.saveConfigToDB()
-
-		np.appState.Window.SetTitle("代理已停止")
+		if np.appState.Window != nil {
+			np.appState.Window.SetTitle("代理已停止")
+		}
 	} else {
-		np.appState.Window.SetTitle("代理未运行")
+		if np.appState.Window != nil {
+			np.appState.Window.SetTitle("代理未运行")
+		}
 	}
 }
 

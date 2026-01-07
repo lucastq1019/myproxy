@@ -51,11 +51,6 @@ type AppState struct {
 // NewAppState 创建并初始化新的应用状态。
 // 返回：初始化后的应用状态实例
 func NewAppState() *AppState {
-	// 创建绑定数据
-	proxyStatusBinding := binding.NewString()
-	portBinding := binding.NewString()
-	serverNameBinding := binding.NewString()
-
 	// 创建 SubscriptionManager（先创建，因为 Store 需要它）
 	subscriptionManager := subscription.NewSubscriptionManager()
 
@@ -77,9 +72,10 @@ func NewAppState() *AppState {
 		ServerService:      serverService,
 		ConfigService:      configService,
 		SubscriptionService: subscriptionService,
-		ProxyStatusBinding: proxyStatusBinding,
-		PortBinding:        portBinding,
-		ServerNameBinding:  serverNameBinding,
+		// 从 Store 获取绑定数据（双向绑定，由 Store 管理）
+		ProxyStatusBinding: dataStore.ProxyStatus.ProxyStatusBinding,
+		PortBinding:        dataStore.ProxyStatus.PortBinding,
+		ServerNameBinding:  dataStore.ProxyStatus.ServerNameBinding,
 		// ProxyService 将在 XrayInstance 创建后初始化
 		ProxyService: nil,
 	}
@@ -87,50 +83,16 @@ func NewAppState() *AppState {
 	return appState
 }
 
-// updateStatusBindings 更新状态绑定数据
+// updateStatusBindings 更新状态绑定数据。
+// 该方法通过 Store 层的 ProxyStatusStore 来更新绑定数据，符合架构规范。
+// 使用双向绑定，数据更新后 UI 会自动刷新。
 func (a *AppState) updateStatusBindings() {
-	// 更新代理状态 - 基于实际运行的代理服务，而不是配置标志
-	isRunning := false
-	proxyPort := 0
-
-	// 检查 xray 实例是否运行（使用 IsRunning 方法检查真实运行状态）
-	if a.XrayInstance != nil && a.XrayInstance.IsRunning() {
-		// xray-core 代理正在运行
-		isRunning = true
-		// 从 xray 实例获取端口
-		if a.XrayInstance.GetPort() > 0 {
-			proxyPort = a.XrayInstance.GetPort()
-		} else {
-			proxyPort = 10080 // 默认端口
-		}
+	if a.Store == nil || a.Store.ProxyStatus == nil {
+		return
 	}
 
-	if isRunning {
-		// 与 UI 设计规范保持一致的文案：当前连接状态 + 已连接
-		a.ProxyStatusBinding.Set("当前连接状态: 🟢 已连接")
-		if proxyPort > 0 {
-			a.PortBinding.Set(fmt.Sprintf("监听端口: %d", proxyPort))
-		} else {
-			a.PortBinding.Set("监听端口: -")
-		}
-	} else {
-		// 未连接状态文案
-		a.ProxyStatusBinding.Set("当前连接状态: ⚪ 未连接")
-		a.PortBinding.Set("监听端口: -")
-	}
-
-	// 更新当前服务器（符合 UI.md 设计：🌐 节点: US - LA - 32ms）
-	if a.Store != nil && a.Store.Nodes != nil {
-		selectedNode := a.Store.Nodes.GetSelected()
-		if selectedNode != nil {
-			// 使用节点名称，格式更简洁
-			a.ServerNameBinding.Set(fmt.Sprintf("🌐 节点: %s", selectedNode.Name))
-		} else {
-			a.ServerNameBinding.Set("🌐 节点: 无")
-		}
-	} else {
-		a.ServerNameBinding.Set("🌐 节点: 无")
-	}
+	// 通过 Store 层更新绑定数据（双向绑定，UI 会自动更新）
+	a.Store.ProxyStatus.UpdateProxyStatus(a.XrayInstance, a.Store.Nodes)
 }
 
 // UpdateProxyStatus 更新代理状态并刷新 UI 绑定数据。
@@ -332,6 +294,23 @@ func (a *AppState) Startup() error {
 	return nil
 }
 
+// Cleanup 清理应用资源，在应用退出时调用。
+// 根据架构规范，xray 实例由 App 持有，退出时需要停止并清理。
+func (a *AppState) Cleanup() {
+	// 停止并清理 xray 实例
+	if a.XrayInstance != nil {
+		if a.XrayInstance.IsRunning() {
+			_ = a.XrayInstance.Stop()
+		}
+		// 注意：这里不设为 nil，因为 App 即将退出，让 GC 处理即可
+	}
+
+	// 清理其他资源（如果有）
+	if a.Logger != nil {
+		// Logger 的清理逻辑（如果有）
+	}
+}
+
 // Run 显示窗口并运行应用的事件循环。
 // 这是应用启动的最后一步，会阻塞直到应用退出。
 func (a *AppState) Run() {
@@ -339,6 +318,8 @@ func (a *AppState) Run() {
 		a.Window.Show()
 	}
 	if a.App != nil {
+		// 在应用退出前清理资源
+		defer a.Cleanup()
 		a.App.Run()
 	}
 }

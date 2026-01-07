@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"fyne.io/fyne/v2"
@@ -25,6 +26,9 @@ type Store struct {
 
 	// 应用配置管理
 	AppConfig *AppConfigStore
+
+	// 代理状态管理
+	ProxyStatus *ProxyStatusStore
 }
 
 // NewStore 创建新的 Store 实例并初始化所有子 Store。
@@ -38,6 +42,7 @@ func NewStore(subscriptionManager *subscription.SubscriptionManager) *Store {
 		Subscriptions: NewSubscriptionsStore(subscriptionManager),
 		Layout:        NewLayoutStore(),
 		AppConfig:     NewAppConfigStore(),
+		ProxyStatus:   NewProxyStatusStore(),
 	}
 	// 设置 SubscriptionsStore 的父 Store 引用
 	s.Subscriptions.setParentStore(s)
@@ -549,5 +554,100 @@ func splitSizeString(s string) []string {
 		parts = append(parts, s[start:])
 	}
 	return parts
+}
+
+// ProxyStatusStore 管理代理状态数据，包括代理状态、端口和服务器名称的双向绑定。
+type ProxyStatusStore struct {
+	// 双向绑定：代理状态文本
+	ProxyStatusBinding binding.String
+
+	// 双向绑定：端口文本
+	PortBinding binding.String
+
+	// 双向绑定：服务器名称文本
+	ServerNameBinding binding.String
+}
+
+// NewProxyStatusStore 创建新的 ProxyStatusStore 实例。
+func NewProxyStatusStore() *ProxyStatusStore {
+	return &ProxyStatusStore{
+		ProxyStatusBinding: binding.NewString(),
+		PortBinding:        binding.NewString(),
+		ServerNameBinding:  binding.NewString(),
+	}
+}
+
+// UpdateProxyStatus 更新代理状态绑定数据。
+// 该方法会根据 XrayInstance 的运行状态和选中的节点自动更新所有绑定数据。
+// 参数：
+//   - xrayInstance: Xray 实例指针，用于检查运行状态和端口（可为 nil）
+//   - nodesStore: 节点 Store，用于获取选中的节点（可为 nil）
+func (ps *ProxyStatusStore) UpdateProxyStatus(xrayInstance interface {
+	IsRunning() bool
+	GetPort() int
+}, nodesStore *NodesStore) {
+	// 更新代理状态 - 基于实际运行的代理服务
+	isRunning := false
+	proxyPort := 0
+
+	// 检查 xray 实例是否运行
+	// 使用反射检查接口值的底层值是否为 nil，避免 nil 指针 panic
+	if xrayInstance != nil {
+		// 使用反射检查底层值是否为 nil
+		v := reflect.ValueOf(xrayInstance)
+		if v.Kind() == reflect.Ptr && v.IsNil() {
+			// 接口值不为 nil，但底层指针为 nil，跳过
+			isRunning = false
+			proxyPort = 0
+		} else {
+			// 使用 defer recover 捕获可能的 nil 指针 panic（双重保护）
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// 如果调用方法时发生 panic（可能是 nil 指针），忽略错误
+						isRunning = false
+						proxyPort = 0
+					}
+				}()
+				
+				// 安全地调用方法
+				if xrayInstance.IsRunning() {
+					isRunning = true
+					if xrayInstance.GetPort() > 0 {
+						proxyPort = xrayInstance.GetPort()
+					} else {
+						proxyPort = 10080 // 默认端口
+					}
+				}
+			}()
+		}
+	}
+
+	if isRunning {
+		// 与 UI 设计规范保持一致的文案：当前连接状态 + 已连接
+		ps.ProxyStatusBinding.Set("当前连接状态: 🟢 已连接")
+		if proxyPort > 0 {
+			ps.PortBinding.Set(fmt.Sprintf("监听端口: %d", proxyPort))
+		} else {
+			ps.PortBinding.Set("监听端口: -")
+		}
+	} else {
+		// 未连接状态文案
+		ps.ProxyStatusBinding.Set("当前连接状态: ⚪ 未连接")
+		ps.PortBinding.Set("监听端口: -")
+	}
+
+	// 更新当前服务器
+	if nodesStore != nil {
+		selectedNode := nodesStore.GetSelected()
+		if selectedNode != nil {
+			// 使用节点名称，格式更简洁
+			ps.ServerNameBinding.Set(fmt.Sprintf("%s", selectedNode.Name))
+		} else {
+			ps.ServerNameBinding.Set("无")
+		}
+	} else {
+		ps.ServerNameBinding.Set("无")
+	}
 }
 

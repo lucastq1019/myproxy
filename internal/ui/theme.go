@@ -41,7 +41,12 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 		case theme.ColorNameButton:
 			return color.NRGBA{R: 45, G: 45, B: 45, A: 255} // 按钮背景，与输入框区分
 		case theme.ColorNamePrimary:
-			return color.NRGBA{R: 255, G: 255, B: 255, A: 255} // 主要元素使用白色
+			// MediumImportance 按钮使用此颜色，加深20%使其更突出
+			// 原色：R:255, G:255, B:255 (白色)
+			// 加深20%：255 * 0.8 = 204，但由于是白色，加深意味着降低亮度
+			// 实际上，对于白色来说，加深20%意味着使用更深的灰色
+			// 为了保持对比度，我们使用一个更深的灰色：255 * 0.7 = 178.5 ≈ 179
+			return color.NRGBA{R: 204, G: 204, B: 204, A: 255} // 主要元素（MediumImportance按钮）使用加深20%的颜色
 		case theme.ColorNameFocus:
 			return color.NRGBA{R: 255, G: 255, B: 255, A: 128} // 焦点高亮，更明显
 		case theme.ColorNameHover:
@@ -64,7 +69,13 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 		case theme.ColorNameButton:
 			return color.NRGBA{R: 245, G: 245, B: 245, A: 255} // 浅灰按钮背景，更柔和
 		case theme.ColorNamePrimary:
-			return color.NRGBA{R: 30, G: 30, B: 30, A: 255} // 主要元素使用深色
+			// MediumImportance 按钮使用此颜色，加深20%使其更突出
+			// 原色：R:30, G:30, B:30 (深灰色)
+			// 加深20%：30 * 0.8 = 24，但由于是深色，加深意味着更深的黑色
+			// 实际上，对于深色来说，加深20%意味着更接近黑色
+			// 计算：30 * 0.8 = 24，但我们想要更明显的加深效果
+			// 使用更深的颜色：R:24, G:24, B:24
+			return color.NRGBA{R: 24, G: 24, B: 24, A: 255} // 主要元素（MediumImportance按钮）使用加深20%的颜色
 		case theme.ColorNameFocus:
 			return color.NRGBA{R: 0, G: 0, B: 0, A: 120} // 焦点高亮，更明显
 		case theme.ColorNameHover:

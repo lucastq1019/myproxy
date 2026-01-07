@@ -88,7 +88,39 @@ config.json              # 运行时配置
    - ✅ 可以依赖：Model 层
    - ❌ 禁止依赖：UI 层、Service 层、Store 层、Database 层
    - 职责：提供独立的功能模块，不涉及数据更新
-   - 示例：`utils.Ping` 用于延迟测试，`utils.GenerateServerID` 用于生成ID
+   - 示例：`utils.Ping` 用于延迟测试，`xray.XrayInstance` 用于代理服务
+   - **xray 包说明**：
+     - xray 是工具层，与 `utils.Ping` 类似：通过参数传入数据，不持有业务数据
+     - xray 实例生命周期 = 代理运行生命周期（启动代理时创建，停止代理时销毁）
+     - 切换节点时：停止旧实例 → 销毁 → 创建新实例 → 启动（xray-core 限制）
+     - 实例对象由 App 层临时持有（用于状态检查和 Service 访问），但生命周期由代理行为决定
+
+### Xray 实例管理规则
+
+1. **xray 定位**：
+   - xray 属于工具层 (`internal/xray/`)，与 `utils.Ping` 类似
+   - 通过参数传入配置，不持有业务数据
+   - 实例生命周期 = 代理运行生命周期（随代理行为创建/销毁）
+
+2. **xray 实例持有**：
+   - xray 实例对象由 **App 层临时持有**（`AppState.XrayInstance`）
+   - 生命周期：由代理行为决定，不是 App 生命周期
+   - App 启动时：字段初始化为 nil
+   - 启动代理时：创建实例并保存到 AppState
+   - 停止代理时：销毁实例（设为 nil）
+   - 切换节点时：销毁旧实例，创建新实例
+   - ❌ 禁止由 Store 层持有（Store 只管理数据，不管理业务服务）
+
+3. **xray 实例创建时机**：
+   - **启动代理时**：根据选中节点创建配置 → 创建 xray 实例 → 启动 → 保存到 AppState
+   - **切换节点时**：停止当前实例 → 销毁实例 → 根据新节点创建配置 → 创建新实例 → 启动
+     - 注意：由于 xray-core 限制，配置变化必须重新创建实例
+   - **停止代理时**：停止实例运行 → 销毁实例（设为 nil）
+   - **App 退出时**：如果实例存在，停止并销毁
+
+4. **xray 与 Service 层关系**：
+   - `ProxyService` 通过 `AppState.XrayInstance` 访问 xray 实例（可能为 nil）
+   - Service 层提供业务方法（如 `StartProxy(node)`），内部操作 App 临时持有的 xray 实例
 
 ### 数据访问规则
 
