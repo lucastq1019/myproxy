@@ -98,6 +98,7 @@ MIT License
 - 本项目仅供学习与研究，请勿用于任何违反当地法律法规的用途。
 - GUI 是唯一正式入口，其余命令行/测试代码仅用于开发调试。
 
+go run -tags debug XXX
 ## TODO list
 - 日志区域可完全折叠 done
 - 界面美化
