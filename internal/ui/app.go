@@ -134,7 +134,7 @@ func (a *AppState) InitApp() error {
 	// 从 Store 加载主题配置，默认使用黑色主题
 	themeVariant := theme.VariantDark
 	if a.Store != nil && a.Store.AppConfig != nil {
-		if themeStr, err := a.Store.AppConfig.GetWithDefault("theme", "dark"); err == nil && themeStr == "light" {
+		if themeStr, err := a.Store.AppConfig.GetWithDefault("theme", ThemeDark); err == nil && themeStr == ThemeLight {
 			themeVariant = theme.VariantLight
 		}
 	}

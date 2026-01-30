@@ -481,13 +481,13 @@ type RoutingOptions struct {
 
 // CreateXrayConfig 创建完整的 xray 配置。
 // 参数：
-//   - localPort: 本地 SOCKS5 监听端口（默认 10080）
+//   - localPort: 本地 SOCKS5 监听端口（默认 10808）
 //   - server: 服务器配置，用于创建出站配置
 //   - logFilePath: 日志文件路径（可选，为空则不设置）
 //   - routing: 路由选项（可选，nil 则仅使用内置规则）
 func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, routing *RoutingOptions) ([]byte, error) {
 	if localPort == 0 {
-		localPort = 10080
+		localPort = 10808
 	}
 
 	// 创建入站配置（本地 SOCKS5 服务器）

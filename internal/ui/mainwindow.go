@@ -357,8 +357,8 @@ func NewMainWindow(appState *AppState) *MainWindow {
 	// 创建各个面板
 	mw.logsPanel = NewLogsPanel(appState)
 
-	// 创建系统代理管理器（默认使用 localhost:10080）
-	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10080)
+	// 创建系统代理管理器（默认使用 localhost:10808）
+	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10808)
 
 	// 设置主窗口和日志面板引用到 AppState，以便其他组件可以刷新日志面板
 	appState.MainWindow = mw
@@ -977,7 +977,7 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 	}
 
 	// 获取当前代理端口
-	proxyPort := 10080
+	proxyPort := 10808
 	if mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
 		if port := mw.appState.XrayInstance.GetPort(); port > 0 {
 			proxyPort = port
@@ -1144,7 +1144,7 @@ func (mw *MainWindow) updateSystemProxyPort() {
 		return
 	}
 
-	proxyPort := 10080
+	proxyPort := 10808
 	if mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
 		if port := mw.appState.XrayInstance.GetPort(); port > 0 {
 			proxyPort = port

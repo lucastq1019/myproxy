@@ -27,7 +27,7 @@ func NewProxyService(xrayInstance *xray.XrayInstance) *ProxyService {
 
 // updateSystemProxyPort 更新系统代理管理器的端口。
 func (ps *ProxyService) updateSystemProxyPort() {
-	proxyPort := 10080
+	proxyPort := 10808
 	if ps.xrayInstance != nil && ps.xrayInstance.IsRunning() {
 		if port := ps.xrayInstance.GetPort(); port > 0 {
 			proxyPort = port
@@ -81,7 +81,7 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 		_ = ps.systemProxy.ClearTerminalProxy()
 		err = ps.systemProxy.SetSystemProxy()
 		if err == nil {
-			proxyPort := 10080
+			proxyPort := 10808
 			if ps.xrayInstance != nil && ps.xrayInstance.IsRunning() {
 				if port := ps.xrayInstance.GetPort(); port > 0 {
 					proxyPort = port
@@ -97,7 +97,7 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 		_ = ps.systemProxy.ClearTerminalProxy()
 		err = ps.systemProxy.SetTerminalProxy()
 		if err == nil {
-			proxyPort := 10080
+			proxyPort := 10808
 			if ps.xrayInstance != nil && ps.xrayInstance.IsRunning() {
 				if port := ps.xrayInstance.GetPort(); port > 0 {
 					proxyPort = port

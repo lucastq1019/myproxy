@@ -22,6 +22,23 @@ func NewMonochromeTheme(variant fyne.ThemeVariant) fyne.Theme {
 	return &MonochromeTheme{variant: variant}
 }
 
+// CurrentThemeColor 从当前应用主题取色，供自定义组件在绘制/刷新时使用，切换主题后可立即生效。
+// 若 app 为 nil 或未设置主题，则回退到默认主题的深色变体。
+func CurrentThemeColor(app fyne.App, name fyne.ThemeColorName) color.Color {
+	if app == nil {
+		return theme.DefaultTheme().Color(name, theme.VariantDark)
+	}
+	t := app.Settings().Theme()
+	if t == nil {
+		return theme.DefaultTheme().Color(name, theme.VariantDark)
+	}
+	variant := theme.VariantDark
+	if mt, ok := t.(*MonochromeTheme); ok {
+		variant = mt.variant
+	}
+	return t.Color(name, variant)
+}
+
 // Color 返回自定义颜色，未覆盖的颜色使用默认主题
 func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	// 以传入 variant 优先，其次使用主题自身 variant

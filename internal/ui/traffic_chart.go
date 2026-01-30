@@ -9,6 +9,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -129,13 +130,17 @@ func (tc *TrafficChart) Stop() {
 
 // CreateRenderer 创建渲染器
 func (tc *TrafficChart) CreateRenderer() fyne.WidgetRenderer {
+	bgColor := color.RGBA{R: 23, G: 23, B: 23, A: 255}
+	if tc.appState != nil && tc.appState.App != nil {
+		bgColor = toRGBA(CurrentThemeColor(tc.appState.App, theme.ColorNameBackground))
+	}
 	return &trafficChartRenderer{
-		trafficChart: tc,
+		trafficChart:   tc,
 		uploadLines:   make([]*canvas.Line, 0),
 		downloadLines: make([]*canvas.Line, 0),
 		uploadLabel:   widget.NewLabel("上传: 0 KB/s"),
 		downloadLabel: widget.NewLabel("下载: 0 KB/s"),
-		bgRect:        canvas.NewRectangle(color.RGBA{R: 240, G: 240, B: 240, A: 255}),
+		bgRect:        canvas.NewRectangle(bgColor),
 	}
 }
 
@@ -217,28 +222,32 @@ func (r *trafficChartRenderer) drawChart(width, height float32) {
 	r.uploadLines = r.uploadLines[:0]
 	r.downloadLines = r.downloadLines[:0]
 	
+	uploadColor := color.RGBA{R: 0, G: 150, B: 255, A: 255}
+	downloadColor := color.RGBA{R: 0, G: 255, B: 100, A: 255}
+	if r.trafficChart.appState != nil && r.trafficChart.appState.App != nil {
+		uploadColor = toRGBA(CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNamePrimary))
+		downloadColor = toRGBA(CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameFocus))
+	}
+
 	// 绘制上传线（连接所有点）
 	for i := 0; i < len(dataPoints)-1; i++ {
 		x1 := float32(i) * pointSpacing
 		y1 := height - float32(dataPoints[i].Upload)*height/float32(maxValue)
 		x2 := float32(i+1) * pointSpacing
 		y2 := height - float32(dataPoints[i+1].Upload)*height/float32(maxValue)
-		
-		line := canvas.NewLine(color.RGBA{R: 0, G: 150, B: 255, A: 255})
+		line := canvas.NewLine(uploadColor)
 		line.Position1 = fyne.NewPos(x1, y1)
 		line.Position2 = fyne.NewPos(x2, y2)
 		line.StrokeWidth = 2
 		r.uploadLines = append(r.uploadLines, line)
 	}
-	
 	// 绘制下载线（连接所有点）
 	for i := 0; i < len(dataPoints)-1; i++ {
 		x1 := float32(i) * pointSpacing
 		y1 := height - float32(dataPoints[i].Download)*height/float32(maxValue)
 		x2 := float32(i+1) * pointSpacing
 		y2 := height - float32(dataPoints[i+1].Download)*height/float32(maxValue)
-		
-		line := canvas.NewLine(color.RGBA{R: 0, G: 255, B: 100, A: 255})
+		line := canvas.NewLine(downloadColor)
 		line.Position1 = fyne.NewPos(x1, y1)
 		line.Position2 = fyne.NewPos(x2, y2)
 		line.StrokeWidth = 2
@@ -253,14 +262,20 @@ func (r *trafficChartRenderer) Refresh() {
 	download := r.trafficChart.currentDownload
 	size := r.trafficChart.Size()
 	r.trafficChart.mu.RUnlock()
-	
+
+	// 使用当前主题色更新背景，切换主题后能立即生效
+	if r.trafficChart.appState != nil && r.trafficChart.appState.App != nil {
+		r.bgRect.FillColor = toRGBA(CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameBackground))
+		r.bgRect.Refresh()
+	}
+
 	// 更新标签
 	r.uploadLabel.SetText(fmt.Sprintf("上传: %s", formatSpeed(upload)))
 	r.downloadLabel.SetText(fmt.Sprintf("下载: %s", formatSpeed(download)))
-	
-	// 重新绘制图表
+
+	// 重新绘制图表（折线会使用当前主题色）
 	r.Layout(size)
-	
+
 	// 刷新所有对象
 	for _, obj := range r.Objects() {
 		obj.Refresh()
@@ -288,6 +303,15 @@ func (r *trafficChartRenderer) Objects() []fyne.CanvasObject {
 
 // Destroy 销毁
 func (r *trafficChartRenderer) Destroy() {
+}
+
+// toRGBA 将 theme 返回的 color.Color 转为 color.RGBA，便于 canvas 使用。
+func toRGBA(c color.Color) color.RGBA {
+	if c == nil {
+		return color.RGBA{R: 23, G: 23, B: 23, A: 255}
+	}
+	r, g, b, a := c.RGBA()
+	return color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
 }
 
 // formatSpeed 格式化速度显示

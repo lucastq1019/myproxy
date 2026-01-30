@@ -21,6 +21,18 @@ const (
 	SettingsMenuAbout
 )
 
+// 主题相关常量
+const (
+	// ThemeDark 深色主题值
+	ThemeDark = "dark"
+	// ThemeLight 浅色主题值
+	ThemeLight = "light"
+	// ThemeDisplayDark 深色主题显示文本
+	ThemeDisplayDark = "深色"
+	// ThemeDisplayLight 浅色主题显示文本
+	ThemeDisplayLight = "浅色"
+)
+
 func (m SettingsMenu) String() string {
 	switch m {
 	case SettingsMenuAppearance:
@@ -91,15 +103,14 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	menuBox := container.NewVBox(sp.menuButtons[0], sp.menuButtons[1], sp.menuButtons[2], sp.menuButtons[3])
 	menuBox = container.NewPadded(menuBox)
 
-	// 右侧内容区
+	// 右侧内容区，使用 Scroll 包裹避免内容撑开窗口
 	sp.contentCard = container.NewMax()
 	sp.contentCard.Add(sp.buildAppearanceContent())
-
-	contentArea := container.NewPadded(sp.contentCard)
+	contentArea := container.NewScroll(container.NewPadded(sp.contentCard))
 
 	// 左右分栏
 	mainContent := container.NewHSplit(menuBox, contentArea)
-	mainContent.SetOffset(0.2)
+	mainContent.SetOffset(0.15)
 
 	sp.content = container.NewBorder(
 		headerBar,
@@ -143,17 +154,20 @@ func (sp *SettingsPage) updateMenuState() {
 
 // buildAppearanceContent 构建设置「外观」内容区。
 func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
-	themeSelect := widget.NewSelect([]string{"深色", "浅色"}, func(s string) {
+	themeOptions := []string{ThemeDisplayDark, ThemeDisplayLight}
+	themeSelect := widget.NewSelect(themeOptions, func(s string) {
 		sp.onThemeChanged(s)
 	})
-	currentTheme := "深色"
+	
+	// 根据当前配置设置选中项
+	currentThemeDisplay := ThemeDisplayDark
 	if sp.appState != nil && sp.appState.ConfigService != nil {
 		t := sp.appState.ConfigService.GetTheme()
-		if t == "light" {
-			currentTheme = "浅色"
+		if t == ThemeLight {
+			currentThemeDisplay = ThemeDisplayLight
 		}
 	}
-	themeSelect.SetSelected(currentTheme)
+	themeSelect.SetSelected(currentThemeDisplay)
 
 	return container.NewVBox(
 		widget.NewLabelWithStyle("外观", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -161,7 +175,7 @@ func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
 		container.NewVBox(
 			widget.NewLabel("主题"),
 			themeSelect,
-			widget.NewLabel("深色 / 浅色"),
+			widget.NewLabel(ThemeDisplayDark + " / " + ThemeDisplayLight),
 		),
 	)
 }
@@ -184,13 +198,12 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		func() fyne.CanvasObject {
 			textBtn := widget.NewButton("", nil)
 			delBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), nil)
-			return container.NewBorder(nil, nil, nil, delBtn, textBtn)
+			return container.NewHBox(textBtn, layout.NewSpacer(), delBtn)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
 			row := obj.(*fyne.Container)
-			// Border: top, bottom, left, right, center -> Objects[3]=right, Objects[4]=center
-			delBtn := row.Objects[3].(*widget.Button)
-			textBtn := row.Objects[4].(*widget.Button)
+			textBtn := row.Objects[0].(*widget.Button)
+			delBtn := row.Objects[2].(*widget.Button)
 
 			if id < 0 || id >= len(sp.routesData) {
 				return
@@ -381,26 +394,47 @@ func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 		widget.NewSeparator(),
 		widget.NewLabel("myproxy  版本 1.0.0"),
 		widget.NewLabel("轻量级代理管理工具，基于 Xray-core 与 Fyne"),
+		widget.NewLabel("邮箱: lucastq1019@gmail.com"),
 	)
 }
 
 // onThemeChanged 主题变更回调。
-func (sp *SettingsPage) onThemeChanged(selected string) {
+func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 	if sp.appState == nil || sp.appState.App == nil {
 		return
 	}
-	newTheme := "dark"
-	if selected == "浅色" {
-		newTheme = "light"
+
+	// 将显示文本转换为主题值
+	newTheme := ThemeDark
+	if selectedDisplay == ThemeDisplayLight {
+		newTheme = ThemeLight
 	}
+
+	// 保存主题配置
 	if sp.appState.ConfigService != nil {
 		_ = sp.appState.ConfigService.SetTheme(newTheme)
 	}
+
+	// 应用主题到 Fyne
 	variant := theme.VariantDark
-	if newTheme == "light" {
+	if newTheme == ThemeLight {
 		variant = theme.VariantLight
 	}
 	sp.appState.App.Settings().SetTheme(NewMonochromeTheme(variant))
+
+	// 延迟到下一帧执行，确保主题已写入 Settings，再强制重绘整棵控件树。
+	w := sp.appState.Window
+	fyne.Do(func() {
+		if w == nil {
+			return
+		}
+		content := w.Canvas().Content()
+		w.SetContent(content)
+		// 部分 Fyne 版本对同引用 SetContent 可能不触发重绘，再显式刷新一次
+		if c := w.Canvas(); c != nil {
+			c.Refresh(content)
+		}
+	})
 }
 
 // onLogLevelChanged 日志级别变更回调。

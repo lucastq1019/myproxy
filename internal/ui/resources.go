@@ -88,7 +88,7 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 	// 从 ConfigService 读取主题配置，默认使用黑色主题
 	themeVariant := theme.VariantDark
 	if appState != nil && appState.ConfigService != nil {
-		if themeStr := appState.ConfigService.GetTheme(); themeStr == "light" {
+		if themeStr := appState.ConfigService.GetTheme(); themeStr == ThemeLight {
 			themeVariant = theme.VariantLight
 		}
 	}

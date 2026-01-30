@@ -472,8 +472,8 @@ func (np *NodePage) onStartProxy(id widget.ListItemID) {
 
 // startProxyWithServer 使用指定的服务器启动代理 - 注释功能
 // func (np *NodePage) startProxyWithServer(srv *database.Node) {
-// 	// 使用固定的10080端口监听本地SOCKS5
-// 	proxyPort := 10080
+// 	// 使用固定的10808端口监听本地SOCKS5
+// 	proxyPort := 10808
 
 // 	// 记录开始启动日志
 // 	if np.appState != nil {

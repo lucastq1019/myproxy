@@ -83,7 +83,7 @@ PlatformProxy (接口)
 
 ```go
 // 创建代理管理器（自动检测平台）
-proxy := systemproxy.NewSystemProxy("127.0.0.1", 10080)
+proxy := systemproxy.NewSystemProxy("127.0.0.1", 10808)
 
 // 设置系统代理
 err := proxy.SetSystemProxy()

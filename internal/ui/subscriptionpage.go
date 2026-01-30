@@ -215,6 +215,7 @@ type SubscriptionCard struct {
 	infoLabel *widget.Label
 	urlLabel  *widget.Label
 	statusBar *canvas.Rectangle
+	bgRect    *canvas.Rectangle // 背景矩形，用于主题切换时重绘
 
 	updateBtn *widget.Button
 	editBtn   *widget.Button
@@ -230,7 +231,7 @@ func NewSubscriptionCard(page *SubscriptionPage) *SubscriptionCard {
 
 	card.infoLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{})
 
-	card.statusBar = canvas.NewRectangle(theme.PrimaryColor())
+	card.statusBar = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
 	card.statusBar.SetMinSize(fyne.NewSize(4, 0))
 
 	// 微型化图标按钮
@@ -249,8 +250,9 @@ func NewSubscriptionCard(page *SubscriptionPage) *SubscriptionCard {
 }
 
 func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
-	bg := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
-	bg.CornerRadius = 10
+	card.bgRect = canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	card.bgRect.CornerRadius = 10
+	bg := card.bgRect
 
 	// 文字信息排版
 	textInfo := container.NewVBox(
@@ -280,6 +282,13 @@ func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
 
 func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	card.sub = sub
+	// 使用当前主题色，切换主题后列表刷新时会生效
+	card.statusBar.FillColor = theme.Color(theme.ColorNamePrimary)
+	card.statusBar.Refresh()
+	if card.bgRect != nil {
+		card.bgRect.FillColor = theme.Color(theme.ColorNameInputBackground)
+		card.bgRect.Refresh()
+	}
 	card.nameLabel.SetText(sub.Label)
 
 	urlDisplay := sub.URL

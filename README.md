@@ -5,7 +5,7 @@
 ## 功能总览
 - GUI：订阅管理、服务器列表、延迟测试、启动/停止代理、实时日志、状态栏，窗口布局自动保存。
 - 代理引擎：内置 xray-core（库方式集成），默认开启本地 SOCKS5 入站，出站可选 SOCKS5/VMess（支持 TLS/WS/H2/gRPC 等常见参数）。
-- 自动代理：以选中服务器生成 xray 配置并启动本地 10080 端口（可自定义），UI 实时回显端口与状态。
+- 自动代理：以选中服务器生成 xray 配置并启动本地 10808 端口（可自定义），UI 实时回显端口与状态。
 - 订阅与服务器：支持 VMess、SOCKS5、JSON/Base64 订阅，数据存入 SQLite；可为订阅加标签，右键/菜单管理服务器。
 - 日志与主题：应用日志+代理日志集中显示，支持级别/类型过滤；主题（浅/深色）和布局比例持久化到数据库。
 - 向后兼容：保留旧版 SOCKS5 转发器（`internal/proxy/forwarder`），但默认路径使用 xray-core。
@@ -55,7 +55,7 @@ go run ./cmd/gui/main.go /path/to/config.json
 ### 使用流程（GUI）
 1. 在订阅面板添加订阅 URL（支持 VMess/SOCKS5/JSON/Base64），可为订阅设置标签。
 2. 等待服务器入库后，在列表中选择需要的节点并测试延迟。
-3. 点击“启动代理”启动本地 SOCKS5（默认 10080，可在配置中调整）。
+3. 点击“启动代理”启动本地 SOCKS5（默认 10808，可在配置中调整）。
 4. 系统/浏览器代理指向 `127.0.0.1:<本地端口>`，日志面板实时查看运行状态。
 
 ## 配置说明
@@ -63,7 +63,7 @@ go run ./cmd/gui/main.go /path/to/config.json
 ```json
 {
   "autoProxyEnabled": false,
-  "autoProxyPort": 10080,
+  "autoProxyPort": 10808,
   "logLevel": "info",
   "logFile": "myproxy.log",
   "selectedServerID": ""
@@ -79,7 +79,7 @@ go run ./cmd/gui/main.go /path/to/config.json
 
 ### xray 工作方式
 - 通过 `internal/xray` 生成本地 SOCKS5 入站 + 选中服务器的出站配置：
-  - 入站：`port = autoProxyPort`（默认 10080），UDP 支持开启
+  - 入站：`port = autoProxyPort`（默认 10808），UDP 支持开启
   - 出站：根据服务器协议自动生成 SOCKS5/VMess 配置，支持 TLS/WS/H2/gRPC 参数
 - 若需要自定义，可参考 `doc/xray-core-integration.md` 和示例 `doc/xray-usage-example.go`。
 - 旧版转发逻辑依然保留在 `internal/proxy/forwarder`，但 GUI 默认走 xray-core。
