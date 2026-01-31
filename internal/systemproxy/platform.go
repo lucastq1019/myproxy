@@ -61,4 +61,3 @@ func (p *UnsupportedProxy) ClearTerminalProxy() error {
 func (p *UnsupportedProxy) GetCurrentProxyMode() ProxyMode {
 	return ProxyModeNone
 }
-

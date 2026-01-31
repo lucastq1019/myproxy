@@ -14,8 +14,9 @@ type CircularButton struct {
 	widget.BaseWidget
 	icon       fyne.Resource
 	onTapped   func()
-	importance widget.ButtonImportance
+	importance widget.Importance
 	size       float32
+	appState   *AppState
 }
 
 // NewCircularButton 创建新的圆形按钮
@@ -23,13 +24,16 @@ type CircularButton struct {
 //   - icon: 图标资源
 //   - onTapped: 点击回调函数
 //   - size: 按钮尺寸（直径）
+//   - appState: 应用状态，用于获取主题颜色
+//
 // 返回：圆形按钮实例
-func NewCircularButton(icon fyne.Resource, onTapped func(), size float32) *CircularButton {
+func NewCircularButton(icon fyne.Resource, onTapped func(), size float32, appState *AppState) *CircularButton {
 	btn := &CircularButton{
 		icon:       icon,
 		onTapped:   onTapped,
 		importance: widget.LowImportance,
 		size:       size,
+		appState:   appState,
 	}
 	btn.ExtendBaseWidget(btn)
 	return btn
@@ -60,14 +64,19 @@ func (cb *CircularButton) MinSize() fyne.Size {
 
 // CreateRenderer 创建渲染器
 func (cb *CircularButton) CreateRenderer() fyne.WidgetRenderer {
-	// 创建圆形背景
-	circle := canvas.NewCircle(theme.Color(theme.ColorNameButton))
+	var bgColor color.Color
+	if cb.appState != nil && cb.appState.App != nil {
+		bgColor = CurrentThemeColor(cb.appState.App, theme.ColorNameButton)
+	} else {
+		bgColor = theme.Color(theme.ColorNameButton)
+	}
+	circle := canvas.NewCircle(bgColor)
 	circle.StrokeWidth = 0
-	
+
 	// 创建图标
 	iconImg := canvas.NewImageFromResource(cb.icon)
 	iconImg.FillMode = canvas.ImageFillContain
-	
+
 	return &circularButtonRenderer{
 		button:  cb,
 		circle:  circle,
@@ -96,16 +105,16 @@ func (r *circularButtonRenderer) Layout(size fyne.Size) {
 	// 圆形背景占满整个区域
 	r.circle.Resize(size)
 	r.circle.Move(fyne.NewPos(0, 0))
-	
+
 	// 图标居中，大小为按钮的 60%
 	iconSize := size.Width * 0.6
 	if size.Height < size.Width {
 		iconSize = size.Height * 0.6
 	}
-	
+
 	iconX := (size.Width - iconSize) / 2
 	iconY := (size.Height - iconSize) / 2
-	
+
 	r.iconImg.Resize(fyne.NewSize(iconSize, iconSize))
 	r.iconImg.Move(fyne.NewPos(iconX, iconY))
 }
@@ -128,25 +137,45 @@ func (r *circularButtonRenderer) Refresh() {
 	case widget.SuccessImportance:
 		// 成功状态使用主题色（通常是绿色或蓝色，取决于主题）
 		// 如果没有主题色，使用 PrimaryColor
-		bgColor = theme.Color(theme.ColorNameSuccess)
+		if r.button.appState != nil && r.button.appState.App != nil {
+			bgColor = CurrentThemeColor(r.button.appState.App, theme.ColorNameSuccess)
+		} else {
+			bgColor = theme.Color(theme.ColorNameSuccess)
+		}
 	case widget.HighImportance:
-		bgColor = theme.Color(theme.ColorNamePrimary)
+		if r.button.appState != nil && r.button.appState.App != nil {
+			bgColor = CurrentThemeColor(r.button.appState.App, theme.ColorNamePrimary)
+		} else {
+			bgColor = theme.Color(theme.ColorNamePrimary)
+		}
 	case widget.MediumImportance:
-		bgColor = theme.Color(theme.ColorNameButton)
+		if r.button.appState != nil && r.button.appState.App != nil {
+			bgColor = CurrentThemeColor(r.button.appState.App, theme.ColorNameButton)
+		} else {
+			bgColor = theme.Color(theme.ColorNameButton)
+		}
 	case widget.LowImportance:
-		bgColor = theme.Color(theme.ColorNameInputBackground)
+		if r.button.appState != nil && r.button.appState.App != nil {
+			bgColor = CurrentThemeColor(r.button.appState.App, theme.ColorNameInputBackground)
+		} else {
+			bgColor = theme.Color(theme.ColorNameInputBackground)
+		}
 	default:
-		bgColor = theme.Color(theme.ColorNameButton)
+		if r.button.appState != nil && r.button.appState.App != nil {
+			bgColor = CurrentThemeColor(r.button.appState.App, theme.ColorNameButton)
+		} else {
+			bgColor = theme.Color(theme.ColorNameButton)
+		}
 	}
-	
+
 	r.circle.FillColor = bgColor
 	r.circle.StrokeColor = bgColor
-	
+
 	// 更新图标
 	if r.button.icon != nil {
 		r.iconImg.Resource = r.button.icon
 	}
-	
+
 	r.circle.Refresh()
 	r.iconImg.Refresh()
 }

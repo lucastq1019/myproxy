@@ -74,7 +74,7 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 	// 检查文件是否已存在
 	iconDir := getIconDir()
 	iconPath := filepath.Join(iconDir, name)
-	
+
 	// 如果文件存在，直接加载
 	if _, err := os.Stat(iconPath); err == nil {
 		fmt.Printf("图标文件已存在，加载: %s\n", iconPath)
@@ -92,11 +92,11 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 			themeVariant = theme.VariantLight
 		}
 	}
-	
+
 	// 创建主题实例并使用 Color 方法获取背景色
 	monochromeTheme := NewMonochromeTheme(themeVariant)
 	bgColorValue := monochromeTheme.Color(theme.ColorNameBackground, themeVariant)
-	
+
 	// 转换为 RGBA
 	var bgColor color.RGBA
 	if nrgba, ok := bgColorValue.(color.NRGBA); ok {
@@ -107,7 +107,7 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 		// 默认颜色（如果转换失败）
 		bgColor = color.RGBA{23, 28, 34, 255}
 	}
-	
+
 	// 使用新的绘制方式创建图标
 	img := createIconImage(size, bgColor)
 
@@ -126,7 +126,7 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 			fmt.Printf("保存图标文件失败 (%s): %v\n", iconPath, err)
 		} else {
 			fmt.Printf("图标已保存到文件: %s\n", iconPath)
-		}	
+		}
 	}
 
 	fmt.Printf("图标创建成功 (%s, %dx%d)，大小: %d 字节\n", name, size, size, buf.Len())
@@ -148,7 +148,7 @@ func createIconImage(size int, bgColor color.RGBA) *image.RGBA {
 	radius := center
 	R := float64(size) / 6.0
 	H := float64(size) / 2.0
-	G := float64(size) / 50.0 // 间隙缩小一半（原来是 size/10）
+	G := float64(size) / 50.0     // 间隙缩小一半（原来是 size/10）
 	L_line := float64(size) / 3.0 // 横线长度缩短1/2（原来是 size/2）
 	W_line := R * 2.0 / 4.0       // 线宽
 
@@ -218,4 +218,3 @@ func createIconImage(size int, bgColor color.RGBA) *image.RGBA {
 
 	return canvas
 }
-

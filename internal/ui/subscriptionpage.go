@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -27,7 +28,7 @@ func NewSubscriptionPage(appState *AppState) *SubscriptionPage {
 	sp := &SubscriptionPage{
 		appState: appState,
 	}
-	
+
 	// 监听 Store 的订阅绑定数据变化，自动刷新列表
 	if appState != nil && appState.Store != nil && appState.Store.Subscriptions != nil {
 		appState.Store.Subscriptions.SubscriptionsBinding.AddListener(binding.NewDataListener(func() {
@@ -36,7 +37,7 @@ func NewSubscriptionPage(appState *AppState) *SubscriptionPage {
 			}
 		}))
 	}
-	
+
 	return sp
 }
 
@@ -66,9 +67,15 @@ func (sp *SubscriptionPage) Build() fyne.CanvasObject {
 	)
 
 	// 组合头部区域
+	var separatorColor color.Color
+	if sp.appState != nil && sp.appState.App != nil {
+		separatorColor = CurrentThemeColor(sp.appState.App, theme.ColorNameSeparator)
+	} else {
+		separatorColor = theme.Color(theme.ColorNameSeparator)
+	}
 	headerStack := container.NewVBox(
 		container.NewPadded(headerBar),
-		canvas.NewLine(theme.Color(theme.ColorNameSeparator)),
+		canvas.NewLine(separatorColor),
 	)
 
 	// 3. 订阅列表 (支持滚动)
@@ -102,7 +109,7 @@ func (sp *SubscriptionPage) getSubscriptionCount() int {
 }
 
 func (sp *SubscriptionPage) createSubscriptionItem() fyne.CanvasObject {
-	return NewSubscriptionCard(sp)
+	return NewSubscriptionCard(sp, sp.appState)
 }
 
 func (sp *SubscriptionPage) updateSubscriptionItem(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -154,11 +161,13 @@ func (sp *SubscriptionPage) showAddSubscriptionDialog() {
 					return
 				}
 			} else {
-				// 降级方案：直接调用数据库
-				_, err := database.AddOrUpdateSubscription(urlEntry.Text, labelEntry.Text)
-				if err != nil {
-					fyne.Do(func() { dialog.ShowError(err, sp.appState.Window) })
-					return
+				// 降级方案：通过Store添加订阅
+				if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.Subscriptions != nil {
+					_, err := sp.appState.Store.Subscriptions.Add(urlEntry.Text, labelEntry.Text)
+					if err != nil {
+						fyne.Do(func() { dialog.ShowError(err, sp.appState.Window) })
+						return
+					}
 				}
 			}
 
@@ -208,6 +217,7 @@ func (sp *SubscriptionPage) batchUpdateSubscriptions() {
 type SubscriptionCard struct {
 	widget.BaseWidget
 	page      *SubscriptionPage
+	appState  *AppState
 	sub       *database.Subscription
 	renderObj fyne.CanvasObject
 
@@ -222,8 +232,8 @@ type SubscriptionCard struct {
 	deleteBtn *widget.Button
 }
 
-func NewSubscriptionCard(page *SubscriptionPage) *SubscriptionCard {
-	card := &SubscriptionCard{page: page}
+func NewSubscriptionCard(page *SubscriptionPage, appState *AppState) *SubscriptionCard {
+	card := &SubscriptionCard{page: page, appState: appState}
 
 	card.nameLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	card.urlLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: false})
@@ -231,7 +241,13 @@ func NewSubscriptionCard(page *SubscriptionPage) *SubscriptionCard {
 
 	card.infoLabel = widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{})
 
-	card.statusBar = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
+	var primaryColor color.Color
+	if appState != nil && appState.App != nil {
+		primaryColor = CurrentThemeColor(appState.App, theme.ColorNamePrimary)
+	} else {
+		primaryColor = theme.Color(theme.ColorNamePrimary)
+	}
+	card.statusBar = canvas.NewRectangle(primaryColor)
 	card.statusBar.SetMinSize(fyne.NewSize(4, 0))
 
 	// 微型化图标按钮
@@ -250,7 +266,13 @@ func NewSubscriptionCard(page *SubscriptionPage) *SubscriptionCard {
 }
 
 func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
-	card.bgRect = canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	var bgColor color.Color
+	if card.appState != nil && card.appState.App != nil {
+		bgColor = CurrentThemeColor(card.appState.App, theme.ColorNameInputBackground)
+	} else {
+		bgColor = theme.Color(theme.ColorNameInputBackground)
+	}
+	card.bgRect = canvas.NewRectangle(bgColor)
 	card.bgRect.CornerRadius = 10
 	bg := card.bgRect
 
@@ -283,10 +305,18 @@ func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
 func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	card.sub = sub
 	// 使用当前主题色，切换主题后列表刷新时会生效
-	card.statusBar.FillColor = theme.Color(theme.ColorNamePrimary)
+	if card.appState != nil && card.appState.App != nil {
+		card.statusBar.FillColor = CurrentThemeColor(card.appState.App, theme.ColorNamePrimary)
+	} else {
+		card.statusBar.FillColor = theme.Color(theme.ColorNamePrimary)
+	}
 	card.statusBar.Refresh()
 	if card.bgRect != nil {
-		card.bgRect.FillColor = theme.Color(theme.ColorNameInputBackground)
+		if card.appState != nil && card.appState.App != nil {
+			card.bgRect.FillColor = CurrentThemeColor(card.appState.App, theme.ColorNameInputBackground)
+		} else {
+			card.bgRect.FillColor = theme.Color(theme.ColorNameInputBackground)
+		}
 		card.bgRect.Refresh()
 	}
 	card.nameLabel.SetText(sub.Label)
@@ -300,8 +330,6 @@ func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	nodeCount := 0
 	if card.page != nil && card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
 		nodeCount, _ = card.page.appState.Store.Subscriptions.GetServerCount(sub.ID)
-	} else {
-		nodeCount, _ = database.GetServerCountBySubscriptionID(sub.ID)
 	}
 	lastUpdate := "从未更新"
 	if !sub.UpdatedAt.IsZero() {
@@ -343,8 +371,10 @@ func (card *SubscriptionCard) Update(sub *database.Subscription) {
 						return
 					}
 				} else {
-					// 降级方案：直接调用数据库
-					database.DeleteSubscription(sub.ID)
+					// 降级方案：通过Store删除订阅
+					if card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
+						_ = card.page.appState.Store.Subscriptions.Delete(sub.ID)
+					}
 				}
 				// 更新绑定数据，自动刷新 UI
 				card.page.Refresh()
@@ -371,18 +401,20 @@ func (card *SubscriptionCard) showEditDialog() {
 			return
 		}
 
-	// 通过 Store 更新订阅（会自动更新数据库和绑定）
-	if card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
-		if err := card.page.appState.Store.Subscriptions.Update(card.sub.ID, urlEntry.Text, labelEntry.Text); err != nil {
-			dialog.ShowError(err, card.page.appState.Window)
-			return
+		// 通过 Store 更新订阅（会自动更新数据库和绑定）
+		if card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
+			if err := card.page.appState.Store.Subscriptions.Update(card.sub.ID, urlEntry.Text, labelEntry.Text); err != nil {
+				dialog.ShowError(err, card.page.appState.Window)
+				return
+			}
+		} else {
+			// 降级方案：通过Store更新订阅
+			if card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
+				_ = card.page.appState.Store.Subscriptions.Update(card.sub.ID, urlEntry.Text, labelEntry.Text)
+			}
 		}
-	} else {
-		// 降级方案：直接调用数据库
-		database.UpdateSubscriptionByID(card.sub.ID, urlEntry.Text, labelEntry.Text)
-	}
-	// 更新绑定数据，自动刷新 UI
-	card.page.Refresh()
+		// 更新绑定数据，自动刷新 UI
+		card.page.Refresh()
 	}, card.page.appState.Window)
 
 	d.Resize(fyne.NewSize(420, 240))

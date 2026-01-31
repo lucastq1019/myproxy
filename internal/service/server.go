@@ -16,11 +16,33 @@ type ServerService struct {
 // NewServerService 创建新的服务器服务实例。
 // 参数：
 //   - store: Store 实例，用于数据访问
+//
 // 返回：初始化后的 ServerService 实例
 func NewServerService(store *store.Store) *ServerService {
 	return &ServerService{
 		store: store,
 	}
+}
+
+// GetAllServers 获取所有服务器。
+// 返回：服务器列表和错误（如果有）
+func (ss *ServerService) GetAllServers() ([]*model.Node, error) {
+	if ss.store == nil || ss.store.Nodes == nil {
+		return nil, fmt.Errorf("服务器服务: Store 未初始化")
+	}
+	return ss.store.Nodes.GetAll(), nil
+}
+
+// GetServerByID 根据ID获取服务器。
+// 参数：
+//   - id: 服务器ID
+//
+// 返回：服务器节点和错误（如果有）
+func (ss *ServerService) GetServerByID(id string) (*model.Node, error) {
+	if ss.store == nil || ss.store.Nodes == nil {
+		return nil, fmt.Errorf("服务器服务: Store 未初始化")
+	}
+	return ss.store.Nodes.Get(id)
 }
 
 // ListServers 获取当前选中订阅的服务器列表。
@@ -63,19 +85,18 @@ func (ss *ServerService) ListServers() []model.Node {
 // GetServersBySubscriptionID 根据订阅ID获取服务器列表。
 // 参数：
 //   - subscriptionID: 订阅ID
+//
 // 返回：服务器列表和错误（如果有）
 func (ss *ServerService) GetServersBySubscriptionID(subscriptionID int64) ([]model.Node, error) {
 	if ss.store == nil || ss.store.Nodes == nil {
 		return nil, fmt.Errorf("服务器服务: Store 未初始化")
 	}
 
-	// 通过 Store 获取指定订阅下的服务器
 	nodes, err := ss.store.Nodes.GetBySubscriptionID(subscriptionID)
 	if err != nil {
 		return nil, fmt.Errorf("获取订阅服务器列表失败: %w", err)
 	}
 
-	// 转换为值切片
 	result := make([]model.Node, len(nodes))
 	for i, node := range nodes {
 		result[i] = *node
@@ -88,58 +109,41 @@ func (ss *ServerService) GetServersBySubscriptionID(subscriptionID int64) ([]mod
 // 参数：
 //   - id: 服务器ID
 //   - delay: 延迟值（毫秒）
+//
 // 返回：错误（如果有）
 func (ss *ServerService) UpdateServerDelay(id string, delay int) error {
 	if ss.store == nil || ss.store.Nodes == nil {
 		return fmt.Errorf("服务器服务: Store 未初始化")
 	}
 
-	// 通过 Store 更新延迟（会自动更新数据库并刷新 Store）
 	return ss.store.Nodes.UpdateDelay(id, delay)
 }
 
-// AddServer 添加服务器。
+// AddOrUpdateServer 添加或更新服务器。
 // 参数：
-//   - server: 服务器节点
+//   - node: 服务器节点
+//   - subscriptionID: 订阅ID（可选）
+//
 // 返回：错误（如果有）
-func (ss *ServerService) AddServer(server model.Node) error {
+func (ss *ServerService) AddOrUpdateServer(node model.Node, subscriptionID *int64) error {
 	if ss.store == nil || ss.store.Nodes == nil {
 		return fmt.Errorf("服务器服务: Store 未初始化")
 	}
 
-	// 通过 Store 添加服务器
-	return ss.store.Nodes.Add(&server)
+	return ss.store.Nodes.Add(&node)
 }
 
-// UpdateServer 更新服务器信息。
-// 参数：
-//   - server: 服务器节点
-// 返回：错误（如果有）
-func (ss *ServerService) UpdateServer(server model.Node) error {
-	// 检查服务器是否存在
-	if ss.store == nil || ss.store.Nodes == nil {
-		return fmt.Errorf("服务器服务: Store 未初始化")
-	}
-
-	_, err := ss.store.Nodes.Get(server.ID)
-	if err != nil {
-		return fmt.Errorf("服务器服务: 服务器不存在: %s", server.ID)
-	}
-
-	// 通过 Store 更新服务器
-	return ss.store.Nodes.Update(&server)
-}
-
-// GetServer 获取服务器。
+// DeleteServer 删除服务器。
 // 参数：
 //   - id: 服务器ID
-// 返回：服务器节点和错误（如果有）
-func (ss *ServerService) GetServer(id string) (*model.Node, error) {
+//
+// 返回：错误（如果有）
+func (ss *ServerService) DeleteServer(id string) error {
 	if ss.store == nil || ss.store.Nodes == nil {
-		return nil, fmt.Errorf("服务器服务: Store 未初始化")
+		return fmt.Errorf("服务器服务: Store 未初始化")
 	}
 
-	return ss.store.Nodes.Get(id)
+	return ss.store.Nodes.Delete(id)
 }
 
 // GetSelectedSubscriptionID 获取当前选中的订阅ID。
@@ -188,5 +192,3 @@ func (ss *ServerService) setSelectedSubscriptionID(subscriptionID int64) {
 	subIDStr := fmt.Sprintf("%d", subscriptionID)
 	_ = ss.store.AppConfig.Set("selectedSubscriptionID", subIDStr)
 }
-
-

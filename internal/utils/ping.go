@@ -23,6 +23,7 @@ func NewPing() *Ping {
 // TestServerDelay 测试单个服务器延迟。
 // 参数：
 //   - server: 服务器节点
+//
 // 返回：延迟值（毫秒）和错误（如果有）
 func (p *Ping) TestServerDelay(server model.Node) (int, error) {
 	// 使用TCP连接测试延迟
@@ -44,6 +45,7 @@ func (p *Ping) TestServerDelay(server model.Node) (int, error) {
 // TestAllServersDelay 测试多个服务器延迟。
 // 参数：
 //   - servers: 服务器节点列表
+//
 // 返回：服务器ID到延迟值的映射（-1表示测试失败）
 func (p *Ping) TestAllServersDelay(servers []model.Node) map[string]int {
 	results := make(map[string]int)
@@ -76,4 +78,3 @@ func (p *Ping) TestAllServersDelay(servers []model.Node) map[string]int {
 
 	return results
 }
-

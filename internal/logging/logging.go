@@ -316,3 +316,69 @@ func (l *Logger) Close() {
 func (l *Logger) GetLogFilePath() string {
 	return l.logFilePath
 }
+
+// Log 记录日志（通用方法，支持外部调用）
+func (l *Logger) Log(level, logType, message string) {
+	// 解析日志级别
+	logLevel, err := parseLogLevel(level)
+	if err != nil {
+		logLevel = LevelInfo
+	}
+
+	// 解析日志类型
+	var lt LogType = LogTypeApp
+	if strings.ToLower(logType) == "xray" {
+		lt = LogTypeProxy
+	}
+
+	l.log(logLevel, lt, "%s", message)
+}
+
+// SafeLogger 安全日志包装器，处理 Logger 为 nil 的情况
+type SafeLogger struct {
+	logger *Logger
+}
+
+// NewSafeLogger 创建安全日志包装器
+func NewSafeLogger(logger *Logger) *SafeLogger {
+	return &SafeLogger{
+		logger: logger,
+	}
+}
+
+// Log 记录日志（安全方法，处理 logger 为 nil 的情况）
+func (sl *SafeLogger) Log(level, logType, message string) {
+	if sl.logger != nil {
+		sl.logger.Log(level, logType, message)
+	}
+}
+
+// Info 记录信息日志
+func (sl *SafeLogger) Info(message string) {
+	sl.Log("INFO", "app", message)
+}
+
+// Error 记录错误日志
+func (sl *SafeLogger) Error(message string) {
+	sl.Log("ERROR", "app", message)
+}
+
+// Warn 记录警告日志
+func (sl *SafeLogger) Warn(message string) {
+	sl.Log("WARN", "app", message)
+}
+
+// Debug 记录调试日志
+func (sl *SafeLogger) Debug(message string) {
+	sl.Log("DEBUG", "app", message)
+}
+
+// IsReady 检查 Logger 是否已初始化
+func (sl *SafeLogger) IsReady() bool {
+	return sl.logger != nil
+}
+
+// SetLogger 设置底层 Logger
+func (sl *SafeLogger) SetLogger(logger *Logger) {
+	sl.logger = logger
+}

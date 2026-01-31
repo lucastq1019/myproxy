@@ -12,6 +12,7 @@ import (
 //   - addr: 服务器地址
 //   - port: 服务器端口
 //   - username: 用户名（用于唯一性）
+//
 // 返回：服务器唯一ID（MD5哈希）
 func GenerateServerID(addr string, port int, username string) string {
 	// 使用地址、端口和用户名生成唯一ID
@@ -19,4 +20,3 @@ func GenerateServerID(addr string, port int, username string) string {
 	hash := md5.Sum([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
-

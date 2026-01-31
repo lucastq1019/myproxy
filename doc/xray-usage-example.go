@@ -20,7 +20,7 @@ func example1_LoadFromFile() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	instance, err := xray.NewXrayInstanceFromJSON(configBytes)
 	if err != nil {
 		log.Fatal(err)
@@ -32,7 +32,7 @@ func example1_LoadFromFile() {
 	}
 
 	log.Println("Xray-core 实例已启动")
-	
+
 	// 保持运行
 	select {}
 }
@@ -68,7 +68,7 @@ func example2_LoadFromJSON() {
 	}
 
 	log.Println("Xray-core 实例已启动")
-	
+
 	// 保持运行
 	select {}
 }
@@ -142,7 +142,7 @@ func example4_VMessOutbound() {
 	}
 
 	configJSON, _ := json.Marshal(fullConfig)
-	
+
 	instance, err := xray.NewXrayInstanceFromJSON(configJSON)
 	if err != nil {
 		log.Fatal(err)
@@ -191,7 +191,7 @@ func example5_SOCKS5WithAuth() {
 	}
 
 	configJSON, _ := json.Marshal(fullConfig)
-	
+
 	instance, err := xray.NewXrayInstanceFromJSON(configJSON)
 	if err != nil {
 		log.Fatal(err)
@@ -208,41 +208,41 @@ func example5_SOCKS5WithAuth() {
 // 示例 6: 集成到现有的 Forwarder 中
 func example6_IntegrateWithForwarder() {
 	// 这个示例展示如何修改 internal/proxy/forwarder.go
-	
+
 	/*
-	// 在 Forwarder 结构体中添加：
-	type Forwarder struct {
-		SOCKS5Client   *socks5.SOCKS5Client
-		XrayInstance   *xray.XrayInstance  // 新增
-		UseXray        bool                 // 新增：是否使用 xray
-		// ... 其他字段
-	}
-
-	// 在 handleTCPConnection 方法中：
-	func (f *Forwarder) handleTCPConnection(localConn net.Conn) {
-		var proxyConn net.Conn
-		var err error
-
-		if f.UseXray && f.XrayInstance != nil {
-			// 注意：Dial 方法已移除，xray-core 通过配置自动处理连接
-			// 请使用配置方式启动 xray-core，它会自动处理所有连接
-			// proxyConn, err = f.XrayInstance.Dial("tcp", f.RemoteAddr)
-			if err != nil {
-				f.log("ERROR", "proxy", "通过 xray-core 连接失败: %v", err)
-				return
-			}
-		} else {
-			// 使用现有的 SOCKS5 客户端
-			proxyConn, err = f.SOCKS5Client.Dial("tcp", f.RemoteAddr)
-			if err != nil {
-				f.log("ERROR", "proxy", "通过 SOCKS5 代理连接失败: %v", err)
-				return
-			}
+		// 在 Forwarder 结构体中添加：
+		type Forwarder struct {
+			SOCKS5Client   *socks5.SOCKS5Client
+			XrayInstance   *xray.XrayInstance  // 新增
+			UseXray        bool                 // 新增：是否使用 xray
+			// ... 其他字段
 		}
-		defer proxyConn.Close()
 
-		// ... 后续的双向转发逻辑保持不变
-	}
+		// 在 handleTCPConnection 方法中：
+		func (f *Forwarder) handleTCPConnection(localConn net.Conn) {
+			var proxyConn net.Conn
+			var err error
+
+			if f.UseXray && f.XrayInstance != nil {
+				// 注意：Dial 方法已移除，xray-core 通过配置自动处理连接
+				// 请使用配置方式启动 xray-core，它会自动处理所有连接
+				// proxyConn, err = f.XrayInstance.Dial("tcp", f.RemoteAddr)
+				if err != nil {
+					f.log("ERROR", "proxy", "通过 xray-core 连接失败: %v", err)
+					return
+				}
+			} else {
+				// 使用现有的 SOCKS5 客户端
+				proxyConn, err = f.SOCKS5Client.Dial("tcp", f.RemoteAddr)
+				if err != nil {
+					f.log("ERROR", "proxy", "通过 SOCKS5 代理连接失败: %v", err)
+					return
+				}
+			}
+			defer proxyConn.Close()
+
+			// ... 后续的双向转发逻辑保持不变
+		}
 	*/
 	fmt.Println("示例代码请参考注释")
 }
@@ -251,4 +251,3 @@ func main() {
 	fmt.Println("Xray-core 集成示例")
 	fmt.Println("请根据需求选择合适的示例函数")
 }
-

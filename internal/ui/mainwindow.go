@@ -360,9 +360,12 @@ func NewMainWindow(appState *AppState) *MainWindow {
 	// 创建系统代理管理器（默认使用 localhost:10808）
 	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10808)
 
-	// 设置主窗口和日志面板引用到 AppState，以便其他组件可以刷新日志面板
-	appState.MainWindow = mw
-	appState.LogsPanel = mw.logsPanel
+	// 设置日志回调函数到 AppState，以便其他组件可以记录日志
+	appState.LogCallback = func(level, logType, message string) {
+		if mw.logsPanel != nil {
+			mw.logsPanel.AppendLog(level, logType, message)
+		}
+	}
 
 	// 注意：系统代理状态的恢复将在 buildHomePage() 中完成
 	// 因为需要先创建 proxyModeRadio 组件
@@ -475,9 +478,9 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 
 		// 创建圆形按钮（使用连接/断开图标，根据状态变化）
 		if mw.appState != nil && mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
-			mw.mainToggleButton = NewCircularButton(theme.CancelIcon(), mw.onToggleProxy, buttonSize)
+			mw.mainToggleButton = NewCircularButton(theme.CancelIcon(), mw.onToggleProxy, buttonSize, mw.appState)
 		} else {
-			mw.mainToggleButton = NewCircularButton(theme.ConfirmIcon(), mw.onToggleProxy, buttonSize)
+			mw.mainToggleButton = NewCircularButton(theme.ConfirmIcon(), mw.onToggleProxy, buttonSize, mw.appState)
 		}
 		mw.mainToggleButton.SetImportance(widget.LowImportance)
 		mw.updateMainToggleButton()
@@ -1082,9 +1085,9 @@ func (mw *MainWindow) SetSystemProxyMode(mode SystemProxyMode) error {
 	err := mw.applySystemProxyModeCore(mode, true)
 
 	// 刷新托盘菜单（如果存在）
-	if mw.appState.TrayManager != nil {
-		mw.appState.TrayManager.RefreshProxyModeMenu()
-	}
+	// 注意：TrayManager 不是 AppState 的字段，而是在 SetupTray 中创建的临时对象
+	// 这里我们不直接引用 TrayManager，因为它的生命周期由 SetupTray 管理
+	// 托盘菜单的刷新会在模式变化时自动处理
 
 	return err
 }

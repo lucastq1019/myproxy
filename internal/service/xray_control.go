@@ -9,9 +9,9 @@ import (
 
 // XrayControlService 代理控制服务层，提供 xray 代理启动和停止的业务逻辑。
 type XrayControlService struct {
-	store        *store.Store
-	config       *ConfigService
-	logCallback  func(level, message string)
+	store       *store.Store
+	config      *ConfigService
+	logCallback func(level, message string)
 }
 
 // NewXrayControlService 创建新的代理控制服务实例。
@@ -19,6 +19,7 @@ type XrayControlService struct {
 //   - store: Store 实例，用于数据访问
 //   - config: ConfigService，用于读取直连路由等配置
 //   - logCallback: 日志回调函数，用于记录日志
+//
 // 返回：初始化后的 XrayControlService 实例
 func NewXrayControlService(store *store.Store, config *ConfigService, logCallback func(level, message string)) *XrayControlService {
 	return &XrayControlService{
@@ -41,6 +42,7 @@ type StartProxyResult struct {
 // 参数：
 //   - oldInstance: 旧的 Xray 实例（如果存在，会先停止）
 //   - logFilePath: 日志文件路径
+//
 // 返回：操作结果（包含 Xray 实例、日志消息和错误）
 func (xcs *XrayControlService) StartProxy(oldInstance *xray.XrayInstance, logFilePath string) *StartProxyResult {
 	if xcs.store == nil || xcs.store.Nodes == nil {
@@ -167,6 +169,7 @@ type StopProxyResult struct {
 // 根据架构规范，xray 实例生命周期 = 代理运行生命周期，停止代理时销毁实例。
 // 参数：
 //   - instance: Xray 实例
+//
 // 返回：操作结果（包含日志消息和错误）
 func (xcs *XrayControlService) StopProxy(instance *xray.XrayInstance) *StopProxyResult {
 	if instance == nil {
@@ -215,6 +218,7 @@ func (xcs *XrayControlService) StopProxy(instance *xray.XrayInstance) *StopProxy
 // IsRunning 检查代理是否正在运行。
 // 参数：
 //   - instance: Xray 实例
+//
 // 返回：是否正在运行
 func (xcs *XrayControlService) IsRunning(instance *xray.XrayInstance) bool {
 	if instance == nil {
@@ -222,4 +226,3 @@ func (xcs *XrayControlService) IsRunning(instance *xray.XrayInstance) bool {
 	}
 	return instance.IsRunning()
 }
-

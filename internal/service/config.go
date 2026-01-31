@@ -8,6 +8,47 @@ import (
 	"myproxy.com/p/internal/store"
 )
 
+// 默认的国内域名直连路由列表
+var defaultDirectRoutes = []string{
+	"domain:baidu.com",
+	"domain:qq.com",
+	"domain:weixin.com",
+	"domain:taobao.com",
+	"domain:jd.com",
+	"domain:aliyun.com",
+	"domain:163.com",
+	"domain:sina.com",
+	"domain:sohu.com",
+	"domain:youku.com",
+	"domain:tudou.com",
+	"domain:iqiyi.com",
+	"domain:cntv.cn",
+	"domain:mi.com",
+	"domain:huawei.com",
+	"domain:oppo.com",
+	"domain:vivo.com",
+	"domain:meituan.com",
+	"domain:dianping.com",
+	"domain:amap.com",
+	"domain:ctrip.com",
+	"domain:elong.com",
+	"domain:tongcheng.com",
+	"domain:qunar.com",
+	"domain:kaola.com",
+	"domain:suning.com",
+	"domain:gome.com.cn",
+	"domain:tmall.com",
+	"domain:alicdn.com",
+	"domain:cdn.baidustatic.com",
+	"domain:qqstatic.com",
+	"domain:wxstatic.com",
+	"domain:taobaocdn.com",
+	"domain:jdcdn.com",
+	"domain:aliyuncdn.com",
+	"domain:163cdn.com",
+	"domain:sinaimg.cn",
+}
+
 // ConfigService 应用配置服务层，提供配置相关的业务逻辑。
 type ConfigService struct {
 	store *store.Store
@@ -16,6 +57,7 @@ type ConfigService struct {
 // NewConfigService 创建新的配置服务实例。
 // 参数：
 //   - store: Store 实例，用于数据访问
+//
 // 返回：初始化后的 ConfigService 实例
 func NewConfigService(store *store.Store) *ConfigService {
 	return &ConfigService{
@@ -39,6 +81,7 @@ func (cs *ConfigService) GetTheme() string {
 // SetTheme 设置主题配置。
 // 参数：
 //   - theme: 主题变体（dark 或 light）
+//
 // 返回：错误（如果有）
 func (cs *ConfigService) SetTheme(theme string) error {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -50,6 +93,7 @@ func (cs *ConfigService) SetTheme(theme string) error {
 // GetWindowSize 获取窗口大小。
 // 参数：
 //   - defaultSize: 默认窗口大小
+//
 // 返回：窗口大小
 func (cs *ConfigService) GetWindowSize(defaultSize fyne.Size) fyne.Size {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -61,6 +105,7 @@ func (cs *ConfigService) GetWindowSize(defaultSize fyne.Size) fyne.Size {
 // SaveWindowSize 保存窗口大小。
 // 参数：
 //   - size: 窗口大小
+//
 // 返回：错误（如果有）
 func (cs *ConfigService) SaveWindowSize(size fyne.Size) error {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -85,6 +130,7 @@ func (cs *ConfigService) GetLogsCollapsed() bool {
 // SetLogsCollapsed 设置日志面板折叠状态。
 // 参数：
 //   - collapsed: 是否折叠
+//
 // 返回：错误（如果有）
 func (cs *ConfigService) SetLogsCollapsed(collapsed bool) error {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -113,6 +159,7 @@ func (cs *ConfigService) GetSystemProxyMode() string {
 // SetSystemProxyMode 设置系统代理模式。
 // 参数：
 //   - mode: 系统代理模式（clear, auto, terminal）
+//
 // 返回：错误（如果有）
 func (cs *ConfigService) SetSystemProxyMode(mode string) error {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -124,6 +171,7 @@ func (cs *ConfigService) SetSystemProxyMode(mode string) error {
 // Get 获取配置值。
 // 参数：
 //   - key: 配置键
+//
 // 返回：配置值和错误（如果有）
 func (cs *ConfigService) Get(key string) (string, error) {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -136,6 +184,7 @@ func (cs *ConfigService) Get(key string) (string, error) {
 // 参数：
 //   - key: 配置键
 //   - defaultValue: 默认值
+//
 // 返回：配置值
 func (cs *ConfigService) GetWithDefault(key, defaultValue string) (string, error) {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -148,6 +197,7 @@ func (cs *ConfigService) GetWithDefault(key, defaultValue string) (string, error
 // 参数：
 //   - key: 配置键
 //   - value: 配置值
+//
 // 返回：错误（如果有）
 func (cs *ConfigService) Set(key, value string) error {
 	if cs.store == nil || cs.store.AppConfig == nil {
@@ -258,4 +308,29 @@ func isLikelyIPOrCIDR(s string) bool {
 // formatDirectRoutes 将直连路由列表格式化为换行分隔的字符串。
 func formatDirectRoutes(routes []string) string {
 	return strings.TrimSpace(strings.Join(routes, "\n"))
+}
+
+// SaveDefaultDirectRoutes 保存默认的直连路由到数据库（仅在第一次运行时调用）。
+// 如果数据库中已有路由配置，则不会覆盖。
+func (cs *ConfigService) SaveDefaultDirectRoutes() error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+
+	existing, err := cs.store.AppConfig.Get("directRoutes")
+	if err == nil && existing != "" {
+		return nil
+	}
+
+	return cs.SetDirectRoutes(defaultDirectRoutes)
+}
+
+// RestoreDefaultDirectRoutes 恢复默认的直连路由（覆盖当前配置）。
+func (cs *ConfigService) RestoreDefaultDirectRoutes() error {
+	return cs.SetDirectRoutes(defaultDirectRoutes)
+}
+
+// GetDefaultDirectRoutes 获取默认的直连路由列表（不修改数据库）。
+func (cs *ConfigService) GetDefaultDirectRoutes() []string {
+	return defaultDirectRoutes
 }

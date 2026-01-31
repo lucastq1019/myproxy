@@ -29,7 +29,7 @@ func (tm *TrayManager) SetupTray() {
 	// 检查应用是否支持桌面扩展（系统托盘需要）
 	if desk, ok := tm.app.(desktop.App); ok {
 		fmt.Println("应用支持桌面扩展，开始设置托盘图标...")
-		
+
 		// 创建托盘图标
 		icon := createTrayIconResource(tm.appState)
 		if icon == nil {
@@ -37,11 +37,11 @@ func (tm *TrayManager) SetupTray() {
 			return
 		}
 		fmt.Println("托盘图标创建成功")
-		
+
 		// 设置托盘图标
 		desk.SetSystemTrayIcon(icon)
 		fmt.Println("托盘图标已设置")
-		
+
 		// 创建托盘菜单
 		tm.createTrayMenu(desk)
 		fmt.Println("托盘菜单已设置")
@@ -169,19 +169,18 @@ func (tm *TrayManager) refreshProxyModeMenu() {
 	}
 }
 
-
 // quit 退出应用
 func (tm *TrayManager) quit() {
 	// 停止日志监控
-	if tm.appState.LogsPanel != nil {
-		tm.appState.LogsPanel.Stop()
+	if tm.appState.MainWindow != nil && tm.appState.MainWindow.logsPanel != nil {
+		tm.appState.MainWindow.logsPanel.Stop()
 	}
-	
+
 	// 保存布局配置
 	if tm.appState.MainWindow != nil {
 		tm.appState.MainWindow.SaveLayoutConfig()
 	}
-	
+
 	// 退出应用
 	tm.app.Quit()
 }

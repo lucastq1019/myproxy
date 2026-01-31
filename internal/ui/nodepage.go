@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -109,9 +110,15 @@ func (np *NodePage) Build() fyne.CanvasObject {
 	)
 
 	// 4. 组合头部区域（添加分隔线，移除 padding 降低高度）
+	var separatorColor color.Color
+	if np.appState != nil && np.appState.App != nil {
+		separatorColor = CurrentThemeColor(np.appState.App, theme.ColorNameSeparator)
+	} else {
+		separatorColor = theme.Color(theme.ColorNameSeparator)
+	}
 	headerStack := container.NewVBox(
 		headerBar, // 移除 padding 降低功能栏高度
-		canvas.NewLine(theme.Color(theme.ColorNameSeparator)),
+		canvas.NewLine(separatorColor),
 	)
 
 	// 5. 搜索框（单独一行，在功能栏下方）
@@ -186,7 +193,7 @@ func (np *NodePage) Build() fyne.CanvasObject {
 			headerStack,
 			searchBar,   // 移除 padding
 			tableHeader, // 表头直接放置，不添加额外 padding
-			canvas.NewLine(theme.Color(theme.ColorNameSeparator)),
+			canvas.NewLine(separatorColor),
 		),
 		nil, nil, nil,
 		container.NewPadded(np.scrollList),
@@ -290,7 +297,7 @@ func (np *NodePage) getFilteredNodes() []*model.Node {
 
 // createNodeItem 创建节点列表项
 func (np *NodePage) createNodeItem() fyne.CanvasObject {
-	return NewServerListItem(np)
+	return NewServerListItem(np, np.appState)
 }
 
 // updateNodeItem 更新节点列表项
@@ -765,6 +772,7 @@ type ServerListItem struct {
 	widget.BaseWidget
 	id          widget.ListItemID
 	panel       *NodePage
+	appState    *AppState
 	renderObj   fyne.CanvasObject // 渲染对象
 	bgRect      *canvas.Rectangle // 背景矩形（用于动态改变颜色）
 	regionLabel *widget.Label
@@ -779,9 +787,11 @@ type ServerListItem struct {
 // NewServerListItem 创建新的服务器列表项
 // 参数：
 //   - panel: NodePage实例
-func NewServerListItem(panel *NodePage) *ServerListItem {
+//   - appState: 应用状态
+func NewServerListItem(panel *NodePage, appState *AppState) *ServerListItem {
 	item := &ServerListItem{
 		panel:       panel,
+		appState:    appState,
 		isSelected:  false,
 		isConnected: false,
 	}
@@ -808,7 +818,13 @@ func NewServerListItem(panel *NodePage) *ServerListItem {
 func (s *ServerListItem) setupLayout() fyne.CanvasObject {
 	// 创建背景（使用输入背景色，与列表项区分）
 	// 保存引用以便动态更新选中状态的颜色
-	s.bgRect = canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
+	var bgColor color.Color
+	if s.appState != nil && s.appState.App != nil {
+		bgColor = CurrentThemeColor(s.appState.App, theme.ColorNameInputBackground)
+	} else {
+		bgColor = theme.Color(theme.ColorNameInputBackground)
+	}
+	s.bgRect = canvas.NewRectangle(bgColor)
 	s.bgRect.CornerRadius = 4 // 较小的圆角，适合列表项
 
 	// 使用 GridWithColumns 自动分配列宽：地区（固定比例）+ 名称（自适应）+ 延迟（固定比例）
@@ -872,18 +888,33 @@ func (s *ServerListItem) Update(server model.Node) {
 		if s.bgRect != nil {
 			if s.isConnected {
 				// 当前连接的节点：使用主题色（蓝色）
-				s.bgRect.FillColor = theme.PrimaryColor()
-				s.bgRect.StrokeColor = theme.PrimaryColor()
+				if s.appState != nil && s.appState.App != nil {
+					s.bgRect.FillColor = CurrentThemeColor(s.appState.App, theme.ColorNamePrimary)
+					s.bgRect.StrokeColor = CurrentThemeColor(s.appState.App, theme.ColorNamePrimary)
+				} else {
+					s.bgRect.FillColor = theme.PrimaryColor()
+					s.bgRect.StrokeColor = theme.PrimaryColor()
+				}
 				s.bgRect.StrokeWidth = 2
 			} else if s.isSelected {
 				// 选中的节点：使用浅蓝色背景
-				s.bgRect.FillColor = theme.Color(theme.ColorNameSelection)
-				s.bgRect.StrokeColor = theme.Color(theme.ColorNameSeparator)
+				if s.appState != nil && s.appState.App != nil {
+					s.bgRect.FillColor = CurrentThemeColor(s.appState.App, theme.ColorNameSelection)
+					s.bgRect.StrokeColor = CurrentThemeColor(s.appState.App, theme.ColorNameSeparator)
+				} else {
+					s.bgRect.FillColor = theme.Color(theme.ColorNameSelection)
+					s.bgRect.StrokeColor = theme.Color(theme.ColorNameSeparator)
+				}
 				s.bgRect.StrokeWidth = 1
 			} else {
 				// 未选中：使用默认背景色
-				s.bgRect.FillColor = theme.Color(theme.ColorNameInputBackground)
-				s.bgRect.StrokeColor = theme.Color(theme.ColorNameSeparator)
+				if s.appState != nil && s.appState.App != nil {
+					s.bgRect.FillColor = CurrentThemeColor(s.appState.App, theme.ColorNameInputBackground)
+					s.bgRect.StrokeColor = CurrentThemeColor(s.appState.App, theme.ColorNameSeparator)
+				} else {
+					s.bgRect.FillColor = theme.Color(theme.ColorNameInputBackground)
+					s.bgRect.StrokeColor = theme.Color(theme.ColorNameSeparator)
+				}
 				s.bgRect.StrokeWidth = 0
 			}
 			s.bgRect.Refresh()
@@ -953,8 +984,8 @@ func (s *ServerListItem) Update(server model.Node) {
 				// 延迟为负，表示测试失败
 				s.statusIcon.SetResource(theme.CancelIcon())
 			} else {
-				// 未测试，显示未知状态
-				s.statusIcon.SetResource(theme.QuestionIcon())
+				// 未测速
+				s.statusIcon.SetResource(theme.InfoIcon())
 			}
 		}
 

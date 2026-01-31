@@ -445,7 +445,7 @@ func (p *SimpleParser) Parse(content string) (*model.Node, error) {
 // 注意：不再维护订阅列表缓存，数据统一由 Store 管理
 type SubscriptionManager struct {
 	client  *http.Client
-	parsers map[string]ServerParser  // 服务器配置解析器映射，key为协议前缀
+	parsers map[string]ServerParser // 服务器配置解析器映射，key为协议前缀
 }
 
 // NewSubscriptionManager 创建新的订阅管理器
@@ -621,7 +621,7 @@ func (sm *SubscriptionManager) UpdateSubscriptionByID(id int64) error {
 	if sub == nil {
 		return fmt.Errorf("订阅不存在")
 	}
-	
+
 	// 调用 UpdateSubscription 更新订阅（会拉取最新内容）
 	return sm.UpdateSubscription(sub.URL, sub.Label)
 }

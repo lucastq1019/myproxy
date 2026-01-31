@@ -475,8 +475,8 @@ func buildSSStreamSettings(server *model.Node) map[string]interface{} {
 
 // RoutingOptions 路由相关配置（直连列表、直连列表是否走代理等）。
 type RoutingOptions struct {
-	DirectRoutes        []string // 用户配置的直连列表（domain:xxx 或 ip/cidr）
-	DirectRoutesUseProxy bool    // true：直连列表走代理；false：走直连
+	DirectRoutes         []string // 用户配置的直连列表（domain:xxx 或 ip/cidr）
+	DirectRoutesUseProxy bool     // true：直连列表走代理；false：走直连
 }
 
 // CreateXrayConfig 创建完整的 xray 配置。
@@ -537,7 +537,7 @@ func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, rou
 			directOutbound,
 		},
 		"routing": map[string]interface{}{
-			"rules": rules,
+			"rules":          rules,
 			"domainStrategy": "AsIs",
 		},
 	}
@@ -626,36 +626,6 @@ func buildRoutingRules(routing *RoutingOptions) []interface{} {
 			"domain:aliyuncdn.com",
 			"domain:163cdn.com",
 			"domain:sinaimg.cn",
-			"domain:sohu.com",
-			"domain:优酷.com",
-			"domain:土豆.com",
-			"domain:爱奇艺.com",
-			"domain:央视.com",
-			"domain:小米.com",
-			"domain:华为.com",
-			"domain:OPPO.com",
-			"domain:vivo.com",
-			"domain:美团.com",
-			"domain:大众点评.com",
-			"domain:高德地图.com",
-			"domain:携程.com",
-			"domain:艺龙.com",
-			"domain:同程.com",
-			"domain:去哪儿.com",
-			"domain:考拉.com",
-			"domain:苏宁.com",
-			"domain:国美.com.cn",
-			"domain:天猫.com",
-			"domain:阿里巴巴.com",
-			"domain:百度.com",
-			"domain:腾讯.com",
-			"domain:微信.com",
-			"domain:淘宝.com",
-			"domain:京东.com",
-			"domain:阿里云.com",
-			"domain:网易.com",
-			"domain:新浪.com",
-			"domain:搜狐.com",
 		},
 		"outboundTag": "direct",
 	}
@@ -763,6 +733,7 @@ func buildRoutingRules(routing *RoutingOptions) []interface{} {
 	// 4. 默认走代理（匹配所有剩余流量）
 	rules = append(rules, map[string]interface{}{
 		"type":        "field",
+		"network":     []string{"tcp", "udp"},
 		"outboundTag": "proxy",
 	})
 

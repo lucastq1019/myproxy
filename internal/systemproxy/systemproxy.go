@@ -61,4 +61,3 @@ func (sp *SystemProxy) UpdateProxy(host string, port int) {
 	sp.proxyPort = port
 	sp.platform = NewPlatformProxy(host, port)
 }
-

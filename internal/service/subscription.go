@@ -9,7 +9,7 @@ import (
 
 // SubscriptionService 订阅服务层，提供订阅相关的业务逻辑。
 type SubscriptionService struct {
-	store              *store.Store
+	store               *store.Store
 	subscriptionManager *subscription.SubscriptionManager
 }
 
@@ -17,10 +17,11 @@ type SubscriptionService struct {
 // 参数：
 //   - store: Store 实例，用于数据访问
 //   - subscriptionManager: 订阅管理器，用于订阅更新操作
+//
 // 返回：初始化后的 SubscriptionService 实例
 func NewSubscriptionService(store *store.Store, subscriptionManager *subscription.SubscriptionManager) *SubscriptionService {
 	return &SubscriptionService{
-		store:              store,
+		store:               store,
 		subscriptionManager: subscriptionManager,
 	}
 }
@@ -28,6 +29,7 @@ func NewSubscriptionService(store *store.Store, subscriptionManager *subscriptio
 // UpdateByID 根据订阅 ID 更新订阅（拉取最新内容）。
 // 参数：
 //   - id: 订阅 ID
+//
 // 返回：错误（如果有）
 func (ss *SubscriptionService) UpdateByID(id int64) error {
 	if ss.subscriptionManager == nil {
@@ -61,6 +63,7 @@ func (ss *SubscriptionService) UpdateByID(id int64) error {
 // 参数：
 //   - url: 订阅 URL
 //   - label: 订阅标签（可选）
+//
 // 返回：错误（如果有）
 func (ss *SubscriptionService) Fetch(url string, label ...string) error {
 	if ss.subscriptionManager == nil {
@@ -90,4 +93,3 @@ func (ss *SubscriptionService) Fetch(url string, label ...string) error {
 
 	return nil
 }
-

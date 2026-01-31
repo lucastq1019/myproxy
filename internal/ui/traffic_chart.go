@@ -23,20 +23,20 @@ type TrafficData struct {
 // TrafficChart 实时流量图组件
 type TrafficChart struct {
 	widget.BaseWidget
-	
+
 	appState *AppState
-	
+
 	// 数据存储（最近的数据点）
 	dataPoints []TrafficData
 	maxPoints  int // 最大数据点数
-	
+
 	// 当前流量统计
 	currentUpload   int64
 	currentDownload int64
-	
+
 	// 锁保护
 	mu sync.RWMutex
-	
+
 	// 更新定时器
 	updateTicker *time.Ticker
 	stopChan     chan struct{}
@@ -51,11 +51,11 @@ func NewTrafficChart(appState *AppState) *TrafficChart {
 		stopChan:   make(chan struct{}),
 	}
 	tc.ExtendBaseWidget(tc)
-	
+
 	// 启动更新定时器（每秒更新一次）
 	tc.updateTicker = time.NewTicker(1 * time.Second)
 	go tc.updateLoop()
-	
+
 	return tc
 }
 
@@ -79,10 +79,10 @@ func (tc *TrafficChart) updateLoop() {
 func (tc *TrafficChart) updateData() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	
+
 	// 获取当前流量（从 xray 实例或模拟数据）
 	var upload, download int64
-	
+
 	if tc.appState != nil && tc.appState.XrayInstance != nil && tc.appState.XrayInstance.IsRunning() {
 		// TODO: 从 xray 实例获取真实流量统计
 		// 目前使用模拟数据
@@ -92,7 +92,7 @@ func (tc *TrafficChart) updateData() {
 		upload = 0
 		download = 0
 	}
-	
+
 	// 添加新数据点
 	now := time.Now()
 	newPoint := TrafficData{
@@ -100,14 +100,14 @@ func (tc *TrafficChart) updateData() {
 		Download: download,
 		Time:     now,
 	}
-	
+
 	tc.dataPoints = append(tc.dataPoints, newPoint)
-	
+
 	// 限制数据点数量
 	if len(tc.dataPoints) > tc.maxPoints {
 		tc.dataPoints = tc.dataPoints[len(tc.dataPoints)-tc.maxPoints:]
 	}
-	
+
 	// 更新当前流量
 	tc.currentUpload = upload
 	tc.currentDownload = download
@@ -130,12 +130,14 @@ func (tc *TrafficChart) Stop() {
 
 // CreateRenderer 创建渲染器
 func (tc *TrafficChart) CreateRenderer() fyne.WidgetRenderer {
-	bgColor := color.RGBA{R: 23, G: 23, B: 23, A: 255}
+	var bgColor color.Color
 	if tc.appState != nil && tc.appState.App != nil {
-		bgColor = toRGBA(CurrentThemeColor(tc.appState.App, theme.ColorNameBackground))
+		bgColor = CurrentThemeColor(tc.appState.App, theme.ColorNameBackground)
+	} else {
+		bgColor = color.NRGBA{R: 23, G: 23, B: 23, A: 255}
 	}
 	return &trafficChartRenderer{
-		trafficChart:   tc,
+		trafficChart:  tc,
 		uploadLines:   make([]*canvas.Line, 0),
 		downloadLines: make([]*canvas.Line, 0),
 		uploadLabel:   widget.NewLabel("上传: 0 KB/s"),
@@ -147,13 +149,13 @@ func (tc *TrafficChart) CreateRenderer() fyne.WidgetRenderer {
 // trafficChartRenderer 流量图渲染器
 type trafficChartRenderer struct {
 	trafficChart *TrafficChart
-	
+
 	uploadLines   []*canvas.Line
 	downloadLines []*canvas.Line
 	uploadLabel   *widget.Label
 	downloadLabel *widget.Label
 	bgRect        *canvas.Rectangle
-	
+
 	objects []fyne.CanvasObject
 }
 
@@ -167,19 +169,19 @@ func (r *trafficChartRenderer) Layout(size fyne.Size) {
 	// 背景矩形
 	r.bgRect.Move(fyne.NewPos(0, 0))
 	r.bgRect.Resize(size)
-	
+
 	// 图表区域（留出标签空间）
 	chartHeight := size.Height - 40
 	chartWidth := size.Width
-	
+
 	// 绘制折线图
 	r.drawChart(chartWidth, chartHeight)
-	
+
 	// 标签位置
 	labelY := size.Height - 35
 	r.uploadLabel.Move(fyne.NewPos(10, labelY))
 	r.uploadLabel.Resize(fyne.NewSize(size.Width/2-10, 20))
-	
+
 	r.downloadLabel.Move(fyne.NewPos(size.Width/2+10, labelY))
 	r.downloadLabel.Resize(fyne.NewSize(size.Width/2-10, 20))
 }
@@ -190,14 +192,14 @@ func (r *trafficChartRenderer) drawChart(width, height float32) {
 	dataPoints := make([]TrafficData, len(r.trafficChart.dataPoints))
 	copy(dataPoints, r.trafficChart.dataPoints)
 	r.trafficChart.mu.RUnlock()
-	
+
 	if len(dataPoints) < 2 {
 		// 清理旧的线条
 		r.uploadLines = r.uploadLines[:0]
 		r.downloadLines = r.downloadLines[:0]
 		return
 	}
-	
+
 	// 找到最大值（用于缩放）
 	maxValue := int64(1)
 	for _, point := range dataPoints {
@@ -208,25 +210,27 @@ func (r *trafficChartRenderer) drawChart(width, height float32) {
 			maxValue = point.Download
 		}
 	}
-	
+
 	// 添加一些余量，确保图表不会贴边
 	maxValue = maxValue * 110 / 100
 	if maxValue == 0 {
 		maxValue = 1
 	}
-	
+
 	// 计算点之间的间距
 	pointSpacing := width / float32(len(dataPoints)-1)
-	
+
 	// 清理旧的线条
 	r.uploadLines = r.uploadLines[:0]
 	r.downloadLines = r.downloadLines[:0]
-	
-	uploadColor := color.RGBA{R: 0, G: 150, B: 255, A: 255}
-	downloadColor := color.RGBA{R: 0, G: 255, B: 100, A: 255}
+
+	var uploadColor, downloadColor color.Color
 	if r.trafficChart.appState != nil && r.trafficChart.appState.App != nil {
-		uploadColor = toRGBA(CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNamePrimary))
-		downloadColor = toRGBA(CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameFocus))
+		uploadColor = CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNamePrimary)
+		downloadColor = CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameFocus)
+	} else {
+		uploadColor = color.NRGBA{R: 0, G: 150, B: 255, A: 255}
+		downloadColor = color.NRGBA{R: 0, G: 255, B: 100, A: 255}
 	}
 
 	// 绘制上传线（连接所有点）
@@ -265,7 +269,7 @@ func (r *trafficChartRenderer) Refresh() {
 
 	// 使用当前主题色更新背景，切换主题后能立即生效
 	if r.trafficChart.appState != nil && r.trafficChart.appState.App != nil {
-		r.bgRect.FillColor = toRGBA(CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameBackground))
+		r.bgRect.FillColor = CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameBackground)
 		r.bgRect.Refresh()
 	}
 
@@ -286,17 +290,17 @@ func (r *trafficChartRenderer) Refresh() {
 func (r *trafficChartRenderer) Objects() []fyne.CanvasObject {
 	objects := make([]fyne.CanvasObject, 0)
 	objects = append(objects, r.bgRect)
-	
+
 	// 添加所有上传线
 	for _, line := range r.uploadLines {
 		objects = append(objects, line)
 	}
-	
+
 	// 添加所有下载线
 	for _, line := range r.downloadLines {
 		objects = append(objects, line)
 	}
-	
+
 	objects = append(objects, r.uploadLabel, r.downloadLabel)
 	return objects
 }
@@ -321,10 +325,10 @@ func formatSpeed(bytes int64) string {
 		MB = KB * 1024
 		GB = MB * 1024
 	)
-	
+
 	var value float64
 	var unit string
-	
+
 	switch {
 	case bytes >= GB:
 		value = float64(bytes) / GB
@@ -339,7 +343,7 @@ func formatSpeed(bytes int64) string {
 		value = float64(bytes)
 		unit = "B/s"
 	}
-	
+
 	if value < 10 {
 		return fmt.Sprintf("%.2f %s", value, unit)
 	} else if value < 100 {

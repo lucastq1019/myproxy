@@ -29,21 +29,21 @@ type LogEntry struct {
 // LogsPanel 管理应用日志和代理日志的显示。
 // 它支持按日志级别和类型过滤，并提供追加日志功能。
 type LogsPanel struct {
-	appState      *AppState
-	logContent    *widget.RichText // 使用 RichText 以支持自定义文本颜色
-	levelSel      *widget.Select
-	typeSel       *widget.Select
-	logBuffer     []LogEntry         // 日志缓冲区
-	bufferMutex   sync.Mutex         // 保护日志缓冲区的互斥锁
-	maxBufferSize int                // 最大缓冲区大小
-	fileWatcher   *fsnotify.Watcher  // 文件监控器
-	ctx           context.Context    // 上下文，用于控制监控 goroutine
-	cancel        context.CancelFunc // 取消函数
-	lastReadPos   int64              // 最后读取的位置
-	isCollapsed   bool               // 是否折叠
-	collapseBtn   *widget.Button     // 折叠/展开按钮
-	logScroll     *container.Scroll  // 日志滚动容器
-	panelContainer fyne.CanvasObject // 面板容器
+	appState       *AppState
+	logContent     *widget.RichText // 使用 RichText 以支持自定义文本颜色
+	levelSel       *widget.Select
+	typeSel        *widget.Select
+	logBuffer      []LogEntry         // 日志缓冲区
+	bufferMutex    sync.Mutex         // 保护日志缓冲区的互斥锁
+	maxBufferSize  int                // 最大缓冲区大小
+	fileWatcher    *fsnotify.Watcher  // 文件监控器
+	ctx            context.Context    // 上下文，用于控制监控 goroutine
+	cancel         context.CancelFunc // 取消函数
+	lastReadPos    int64              // 最后读取的位置
+	isCollapsed    bool               // 是否折叠
+	collapseBtn    *widget.Button     // 折叠/展开按钮
+	logScroll      *container.Scroll  // 日志滚动容器
+	panelContainer fyne.CanvasObject  // 面板容器
 }
 
 // NewLogsPanel 创建并初始化日志显示面板。
@@ -181,7 +181,7 @@ func (lp *LogsPanel) toggleCollapse() {
 	lp.isCollapsed = !lp.isCollapsed
 	lp.updateCollapseState()
 	lp.updateCollapseButtonText()
-	
+
 	// 保存状态到数据库（通过 ConfigService）
 	if lp.appState != nil && lp.appState.ConfigService != nil {
 		if err := lp.appState.ConfigService.SetLogsCollapsed(lp.isCollapsed); err != nil {
@@ -197,7 +197,7 @@ func (lp *LogsPanel) updateCollapseState() {
 	if lp.logScroll == nil {
 		return
 	}
-	
+
 	if lp.isCollapsed {
 		// 折叠：隐藏日志内容，只显示控制栏
 		lp.logScroll.Hide()
@@ -205,7 +205,7 @@ func (lp *LogsPanel) updateCollapseState() {
 		// 展开：显示日志内容
 		lp.logScroll.Show()
 	}
-	
+
 	// 刷新容器
 	if lp.panelContainer != nil {
 		lp.panelContainer.Refresh()
@@ -217,7 +217,7 @@ func (lp *LogsPanel) updateCollapseButtonText() {
 	if lp.collapseBtn == nil {
 		return
 	}
-	
+
 	var icon fyne.Resource
 	if lp.isCollapsed {
 		icon = theme.MenuExpandIcon()

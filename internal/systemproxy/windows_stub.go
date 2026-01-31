@@ -37,4 +37,3 @@ func (p *WindowsProxy) ClearTerminalProxy() error {
 func (p *WindowsProxy) GetCurrentProxyMode() ProxyMode {
 	return ProxyModeNone
 }
-

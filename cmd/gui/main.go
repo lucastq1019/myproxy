@@ -17,11 +17,17 @@ func main() {
 	}
 	defer database.CloseDB()
 
+	// 创建应用工厂
+	factory := ui.NewApplicationFactory()
+
 	// 创建应用状态
-	appState := ui.NewAppState()
+	appState, err := factory.CreateAppState()
+	if err != nil {
+		log.Fatalf("创建应用状态失败: %v", err)
+	}
 
 	// 统一初始化应用（包括 Fyne 应用、主窗口、日志、托盘等）
-	if err := appState.Startup(); err != nil {
+	if err := factory.InitializeApplication(appState); err != nil {
 		log.Fatalf("应用启动失败: %v", err)
 	}
 

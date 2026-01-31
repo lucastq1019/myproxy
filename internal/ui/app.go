@@ -16,13 +16,18 @@ import (
 	"myproxy.com/p/internal/xray"
 )
 
-// AppState 管理应用的整体状态，包括管理器、日志和 UI 组件。
+// AppState 管理应用的整体状态，包括管理器、日志和业务状态。
 // 它作为应用的核心状态容器，协调各个组件之间的交互。
 type AppState struct {
-	Ping *utils.Ping
-	Logger      *logging.Logger
-	App         fyne.App
-	Window      fyne.Window
+	// 初始化状态
+	initialized bool
+
+	Ping       *utils.Ping
+	Logger     *logging.Logger
+	SafeLogger *logging.SafeLogger // 安全日志包装器，处理 Logger 未初始化的情况
+	App        fyne.App
+	Window     fyne.Window
+	MainWindow *MainWindow // 主窗口实例，用于页面导航
 
 	// Store - 数据层核心，管理所有数据和双向绑定
 	Store *store.Store
@@ -42,54 +47,42 @@ type AppState struct {
 	PortBinding        binding.String // 端口文本
 	ServerNameBinding  binding.String // 服务器名称文本
 
-	// 主窗口引用 - 用于刷新日志面板
-	MainWindow *MainWindow
-
-	// 日志面板引用 - 用于追加日志
-	LogsPanel *LogsPanel
-
-	// 托盘管理器引用 - 用于刷新托盘菜单
-	TrayManager *TrayManager
+	// 日志回调函数 - 用于日志系统
+	LogCallback func(level, logType, message string)
 }
 
 // NewAppState 创建并初始化新的应用状态。
 // 返回：初始化后的应用状态实例
 func NewAppState() *AppState {
-	// 创建 SubscriptionManager（先创建，因为 Store 需要它）
 	subscriptionManager := subscription.NewSubscriptionManager()
-
-	// 创建 Store 实例（传入 SubscriptionManager，改进依赖注入）
 	dataStore := store.NewStore(subscriptionManager)
-
-	// 创建服务层（按依赖顺序创建）
 	serverService := service.NewServerService(dataStore)
 	configService := service.NewConfigService(dataStore)
 	subscriptionService := service.NewSubscriptionService(dataStore, subscriptionManager)
-
-	// 创建 Ping 工具
 	pingUtil := utils.NewPing()
 
-	// 创建日志回调函数（用于 XrayControlService）
-	// 注意：此时 Logger 还未创建，使用临时回调，Logger 创建后会在 InitLogger 中更新
 	logCallback := func(level, message string) {
-		// 临时日志回调，Logger 创建后会被替换为真正的日志回调
 	}
 
 	appState := &AppState{
-		Ping:               pingUtil,
-		Logger:             nil, // Logger 将在 InitLogger 中创建
-		Store:              dataStore,
-		ServerService:      serverService,
-		ConfigService:      configService,
+		Ping:                pingUtil,
+		Logger:              nil,
+		SafeLogger:          logging.NewSafeLogger(nil),
+		Store:               dataStore,
+		ServerService:       serverService,
+		ConfigService:       configService,
 		SubscriptionService: subscriptionService,
-		// 从 Store 获取绑定数据（双向绑定，由 Store 管理）
-		ProxyStatusBinding: dataStore.ProxyStatus.ProxyStatusBinding,
-		PortBinding:        dataStore.ProxyStatus.PortBinding,
-		ServerNameBinding:  dataStore.ProxyStatus.ServerNameBinding,
-		// 初始化 ProxyService
-		ProxyService: service.NewProxyService(nil),
-		// XrayControlService 使用临时日志回调，Logger 创建后会更新
-		XrayControlService: service.NewXrayControlService(dataStore, configService, logCallback),
+		ProxyStatusBinding:  dataStore.ProxyStatus.ProxyStatusBinding,
+		PortBinding:         dataStore.ProxyStatus.PortBinding,
+		ServerNameBinding:   dataStore.ProxyStatus.ServerNameBinding,
+		ProxyService:        service.NewProxyService(nil),
+		XrayControlService:  service.NewXrayControlService(dataStore, configService, logCallback),
+	}
+
+	appState.LogCallback = func(level, logType, message string) {
+		if appState.Logger != nil {
+			appState.Logger.Log(level, logType, message)
+		}
 	}
 
 	return appState
@@ -118,11 +111,8 @@ func (a *AppState) UpdateProxyStatus() {
 // 该方法会创建应用实例、设置主题、创建主窗口，并加载 Store 数据。
 // 注意：必须在创建 UI 组件之前调用此方法。
 func (a *AppState) InitApp() error {
-	// 创建 Fyne 应用
 	a.App = app.NewWithID("com.myproxy.socks5")
-	
-	// 设置应用图标（使用自定义图标）
-	// 这会同时设置 Dock 图标和窗口图标（在 macOS 上）
+
 	appIcon := createAppIcon(a)
 	if appIcon != nil {
 		a.App.SetIcon(appIcon)
@@ -130,52 +120,53 @@ func (a *AppState) InitApp() error {
 	} else {
 		fmt.Println("警告: 应用图标创建失败")
 	}
-	
-	// 从 Store 加载主题配置，默认使用黑色主题
-	themeVariant := theme.VariantDark
+
+	themeStr := ThemeDark
 	if a.Store != nil && a.Store.AppConfig != nil {
-		if themeStr, err := a.Store.AppConfig.GetWithDefault("theme", ThemeDark); err == nil && themeStr == ThemeLight {
-			themeVariant = theme.VariantLight
+		if ts, err := a.Store.AppConfig.GetWithDefault("theme", ThemeDark); err == nil {
+			themeStr = ts
 		}
 	}
+
+	themeVariant := theme.VariantDark
+	switch themeStr {
+	case ThemeLight:
+		themeVariant = theme.VariantLight
+	case ThemeSystem:
+		themeVariant = a.App.Settings().ThemeVariant()
+	default:
+		themeVariant = theme.VariantDark
+	}
 	a.App.Settings().SetTheme(NewMonochromeTheme(themeVariant))
-	
-	// 创建主窗口
+
 	a.Window = a.App.NewWindow("myproxy")
-	
-	// 从 Store 读取窗口大小，如果没有则使用默认值
+
 	defaultSize := fyne.NewSize(420, 520)
 	windowSize := LoadWindowSize(a, defaultSize)
 	a.Window.Resize(windowSize)
 
-	// Fyne 应用初始化后，可以加载 Store 数据（必须在 Fyne 应用初始化后）
 	if a.Store != nil {
 		a.Store.LoadAll()
 	}
-	
-	// 更新状态绑定
+
+	if a.ConfigService != nil {
+		_ = a.ConfigService.SaveDefaultDirectRoutes()
+	}
+
 	a.updateStatusBindings()
 
 	return nil
 }
 
 // InitLogger 初始化日志记录器。
-// 该方法会从 Store 读取日志配置，创建 Logger 并设置日志面板回调。
-// 注意：必须在 MainWindow 和 LogsPanel 创建后调用此方法。
+// 该方法会从 Store 读取日志配置，创建 Logger 并设置日志回调。
 func (a *AppState) InitLogger() error {
-	if a.LogsPanel == nil {
-		return fmt.Errorf("应用状态: LogsPanel 未初始化，无法创建 Logger")
-	}
-
-	// 创建日志回调函数，用于实时更新UI（确保日志文件写入和UI显示一致）
 	logCallback := func(level, logType, message, logLine string) {
-		if a.LogsPanel != nil {
-			// 直接使用完整的日志行，确保格式与文件中的格式完全一致
-			a.LogsPanel.AppendLogLine(logLine)
+		if a.LogCallback != nil {
+			a.LogCallback(level, logType, message)
 		}
 	}
 
-	// 从 Store 读取日志配置并初始化 logger（使用硬编码默认值）
 	logFile := "myproxy.log"
 	logLevel := "info"
 	if a.Store != nil && a.Store.AppConfig != nil {
@@ -192,30 +183,21 @@ func (a *AppState) InitLogger() error {
 		return fmt.Errorf("应用状态: 初始化日志失败: %w", err)
 	}
 
-	// 设置 logger 到 appState
 	a.Logger = logger
+	a.SafeLogger.SetLogger(logger)
 
-	// 更新 XrayControlService 的日志回调（使用真实的日志回调）
 	if a.XrayControlService != nil {
-		// 创建真正的日志回调函数，将日志转发到 AppState.AppendLog
 		realLogCallback := func(level, message string) {
 			a.AppendLog(level, "xray", message)
 		}
-		// 注意：XrayControlService 目前不支持更新回调，需要在创建时就传入
-		// 这里我们重新创建 service 实例（Logger 创建后只初始化一次）
 		a.XrayControlService = service.NewXrayControlService(a.Store, a.ConfigService, realLogCallback)
-	}
-
-	// Logger 初始化后，启动日志文件监控（用于监控 xray 日志等直接从文件写入的日志）
-	if a.LogsPanel != nil {
-		a.LogsPanel.StartLogFileWatcher()
 	}
 
 	return nil
 }
 
-// AppendLog 追加一条日志到日志面板（全局接口）
-// 该方法可以从任何地方调用，会自动追加到日志缓冲区并更新显示
+// AppendLog 追加一条日志到日志系统（全局接口）
+// 该方法可以从任何地方调用，会自动追加到日志系统
 // 参数：
 //   - level: 日志级别 (DEBUG, INFO, WARN, ERROR, FATAL)
 //   - logType: 日志类型 (app 或 xray；其他将归并为 app)
@@ -229,8 +211,13 @@ func (a *AppState) AppendLog(level, logType, message string) {
 	default:
 		logType = "app"
 	}
-	if a.LogsPanel != nil {
-		a.LogsPanel.AppendLog(level, logType, message)
+	// 使用 LogCallback 回调函数
+	if a.LogCallback != nil {
+		a.LogCallback(level, logType, message)
+	}
+	// 如果 Logger 已初始化，也通过 Logger 记录
+	if a.Logger != nil {
+		a.Logger.Log(level, logType, message)
 	}
 }
 
@@ -238,6 +225,7 @@ func (a *AppState) AppendLog(level, logType, message string) {
 // 参数：
 //   - appState: 应用状态（包含 Store）
 //   - defaultSize: 默认窗口大小
+//
 // 返回：窗口大小
 func LoadWindowSize(appState *AppState, defaultSize fyne.Size) fyne.Size {
 	if appState != nil && appState.Store != nil && appState.Store.AppConfig != nil {
@@ -259,7 +247,6 @@ func SaveWindowSize(appState *AppState, size fyne.Size) {
 // SetupTray 设置系统托盘
 func (a *AppState) SetupTray() {
 	trayManager := NewTrayManager(a)
-	a.TrayManager = trayManager // 保存到 AppState 以便其他组件访问
 	fmt.Println("开始设置系统托盘...")
 	trayManager.SetupTray()
 	fmt.Println("系统托盘设置完成")
@@ -267,20 +254,14 @@ func (a *AppState) SetupTray() {
 
 // SetupWindowCloseHandler 设置窗口关闭事件处理
 func (a *AppState) SetupWindowCloseHandler() {
-	if a.Window == nil || a.MainWindow == nil {
+	if a.Window == nil {
 		return
 	}
-	
+
 	a.Window.SetCloseIntercept(func() {
 		// 保存窗口大小到数据库（通过 Store）
 		if a.Window != nil && a.Window.Canvas() != nil {
 			SaveWindowSize(a, a.Window.Canvas().Size())
-		}
-		// 保存布局配置到数据库（通过 Store）
-		if a.MainWindow != nil {
-			a.MainWindow.SaveLayoutConfig()
-			// 清理资源
-			a.MainWindow.Cleanup()
 		}
 		// 配置已由 Store 自动管理，无需手动保存
 		// 隐藏窗口而不是关闭（Fyne 会自动处理 Dock 图标点击显示窗口）
@@ -293,38 +274,45 @@ func (a *AppState) SetupWindowCloseHandler() {
 // 该方法按顺序执行：初始化 Fyne 应用、创建主窗口、初始化日志、设置窗口内容、设置托盘和关闭事件。
 // 注意：必须在数据库初始化后调用此方法。
 func (a *AppState) Startup() error {
-	// 1. 初始化 Fyne 应用和窗口，加载 Store 数据
+	if a.initialized {
+		return fmt.Errorf("应用状态: 已经初始化过")
+	}
+
 	if err := a.InitApp(); err != nil {
 		return fmt.Errorf("应用状态: 初始化应用失败: %w", err)
 	}
 
-	// 2. 创建主窗口（此时 LogsPanel 已创建）
-	// 注意：NewMainWindow 内部已经设置了 a.MainWindow 和 a.LogsPanel
 	mainWindow := NewMainWindow(a)
+	a.MainWindow = mainWindow
 
-	// 3. 初始化 Logger（需要在 LogsPanel 创建后）
 	if err := a.InitLogger(); err != nil {
 		return fmt.Errorf("应用状态: 初始化日志失败: %w", err)
 	}
 
-	// 4. 设置窗口内容
 	content := mainWindow.Build()
 	if content != nil {
 		a.Window.SetContent(content)
 	}
 
-	// 5. 设置系统托盘
 	a.SetupTray()
-
-	// 6. 设置窗口关闭事件
 	a.SetupWindowCloseHandler()
 
-	// 7. 系统启动时自动加载代理配置
 	if err := a.autoLoadProxyConfig(); err != nil {
-		a.AppendLog("INFO", "app", "自动加载代理配置失败: " + err.Error())
+		a.AppendLog("INFO", "app", "自动加载代理配置失败: "+err.Error())
 	}
 
+	a.initialized = true
 	return nil
+}
+
+// IsInitialized 检查应用状态是否已初始化。
+func (a *AppState) IsInitialized() bool {
+	return a.initialized
+}
+
+// Reset 重置应用状态，允许重新初始化。
+func (a *AppState) Reset() {
+	a.initialized = false
 }
 
 // autoLoadProxyConfig 系统启动时自动加载代理配置
@@ -334,32 +322,26 @@ func (a *AppState) autoLoadProxyConfig() error {
 		return fmt.Errorf("应用状态: Store 未初始化")
 	}
 
-	// 检查是否需要自动启动代理
 	autoStart, err := a.Store.AppConfig.GetWithDefault("autoStartProxy", "false")
 	if err != nil || autoStart != "true" {
-		return nil // 不需要自动启动
+		return nil
 	}
 
-	// 获取保存的选中服务器 ID
 	selectedServerID, err := a.Store.AppConfig.GetWithDefault("selectedServerID", "")
 	if err != nil || selectedServerID == "" {
 		return fmt.Errorf("应用状态: 未找到保存的选中服务器")
 	}
 
-	// 选中保存的服务器
 	if err := a.Store.Nodes.Select(selectedServerID); err != nil {
 		return fmt.Errorf("应用状态: 选中服务器失败: %w", err)
 	}
 
-	// 启动代理
 	a.AppendLog("INFO", "app", "正在自动启动代理服务...")
 
-	// 使用 XrayControlService 启动代理
 	if a.XrayControlService == nil {
 		return fmt.Errorf("应用状态: XrayControlService 未初始化")
 	}
 
-	// 启动代理（使用统一日志路径）
 	unifiedLogPath := ""
 	if a.Logger != nil {
 		unifiedLogPath = a.Logger.GetLogFilePath()
@@ -369,15 +351,12 @@ func (a *AppState) autoLoadProxyConfig() error {
 		return fmt.Errorf("应用状态: 启动代理失败: %w", result.Error)
 	}
 
-	// 更新 XrayInstance 引用
 	a.XrayInstance = result.XrayInstance
 
-	// 更新 ProxyService 的 XrayInstance 引用
 	if a.ProxyService != nil {
 		a.ProxyService.UpdateXrayInstance(a.XrayInstance)
 	}
 
-	// 更新状态绑定
 	a.updateStatusBindings()
 
 	a.AppendLog("INFO", "app", "代理服务自动启动成功")
@@ -387,17 +366,28 @@ func (a *AppState) autoLoadProxyConfig() error {
 // Cleanup 清理应用资源，在应用退出时调用。
 // 根据架构规范，xray 实例由 App 持有，退出时需要停止并清理。
 func (a *AppState) Cleanup() {
-	// 停止并清理 xray 实例
 	if a.XrayInstance != nil {
 		if a.XrayInstance.IsRunning() {
 			_ = a.XrayInstance.Stop()
 		}
-		// 注意：这里不设为 nil，因为 App 即将退出，让 GC 处理即可
+		a.XrayInstance = nil
 	}
 
-	// 清理其他资源（如果有）
 	if a.Logger != nil {
-		// Logger 的清理逻辑（如果有）
+		a.Logger.Close()
+		a.Logger = nil
+	}
+
+	if a.SafeLogger != nil {
+		a.SafeLogger.SetLogger(nil)
+	}
+
+	if a.Store != nil {
+		a.Store.Reset()
+	}
+
+	if a.ProxyService != nil {
+		a.ProxyService.UpdateXrayInstance(nil)
 	}
 }
 

@@ -61,4 +61,3 @@ func (p *LinuxProxy) GetCurrentProxyMode() ProxyMode {
 	}
 	return ProxyModeNone
 }
-

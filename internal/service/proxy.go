@@ -9,13 +9,14 @@ import (
 
 // ProxyService 系统代理服务层，提供系统代理相关的业务逻辑。
 type ProxyService struct {
-	systemProxy *systemproxy.SystemProxy
+	systemProxy  *systemproxy.SystemProxy
 	xrayInstance *xray.XrayInstance
 }
 
 // NewProxyService 创建新的代理服务实例。
 // 参数：
 //   - xrayInstance: Xray 实例，用于获取代理端口
+//
 // 返回：初始化后的 ProxyService 实例
 func NewProxyService(xrayInstance *xray.XrayInstance) *ProxyService {
 	ps := &ProxyService{
@@ -53,6 +54,7 @@ type ApplySystemProxyModeResult struct {
 // ApplySystemProxyMode 应用系统代理模式。
 // 参数：
 //   - mode: 系统代理模式（clear, auto, terminal）
+//
 // 返回：操作结果（包含日志消息和错误）
 func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeResult {
 	ps.updateSystemProxyPort()
@@ -120,4 +122,3 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 		Error:      err,
 	}
 }
-

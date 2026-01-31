@@ -156,13 +156,13 @@ func createTables() error {
 func InitDefaultConfig() error {
 	// 定义默认配置（硬编码，避免暴露）
 	defaultConfigs := map[string]string{
-		"logLevel":          "info",  // 日志级别：info（生产环境默认）
-		"logFile":           "myproxy.log", // 日志文件
-		"theme":             "dark",  // 主题：dark（默认黑色主题）
-		"autoProxyEnabled":  "false", // 自动代理：默认关闭
-		"autoProxyPort":     "1080",  // 自动代理端口：默认1080
-		"selectedServerID":  "",      // 选中的服务器ID：默认空
-		"selectedSubscriptionID": "0", // 选中的订阅ID：默认0（全部）
+		"logLevel":               "info",        // 日志级别：info（生产环境默认）
+		"logFile":                "myproxy.log", // 日志文件
+		"theme":                  "dark",        // 主题：dark（默认黑色主题）
+		"autoProxyEnabled":       "false",       // 自动代理：默认关闭
+		"autoProxyPort":          "1080",        // 自动代理端口：默认1080
+		"selectedServerID":       "",            // 选中的服务器ID：默认空
+		"selectedSubscriptionID": "0",           // 选中的订阅ID：默认0（全部）
 	}
 
 	// 遍历默认配置，如果不存在则写入
@@ -181,7 +181,7 @@ func InitDefaultConfig() error {
 func migrateTables() error {
 	// 检查并添加新字段
 	migrations := []struct {
-		column string
+		column  string
 		colType string
 	}{
 		{"node_protocol_type", "TEXT DEFAULT 'socks5'"},
@@ -258,7 +258,6 @@ func CloseDB() error {
 	}
 	return nil
 }
-
 
 // AddOrUpdateSubscription 添加新订阅或更新现有订阅。
 // 如果订阅 URL 已存在，则更新其标签；否则创建新订阅。
@@ -372,7 +371,7 @@ func DeleteSubscription(subscriptionID int64) error {
 	if err := DeleteServersBySubscriptionID(subscriptionID); err != nil {
 		return fmt.Errorf("删除订阅关联服务器失败: %w", err)
 	}
-	
+
 	// 再删除订阅本身
 	_, err := DB.Exec("DELETE FROM subscriptions WHERE id = ?", subscriptionID)
 	if err != nil {
@@ -412,7 +411,7 @@ func GetSubscriptionByID(id int64) (*Subscription, error) {
 // 返回：错误（如果有）
 func UpdateSubscriptionByID(id int64, url, label string) error {
 	now := time.Now()
-	
+
 	// 检查订阅是否存在
 	existingSub, err := GetSubscriptionByID(id)
 	if err != nil {
@@ -421,7 +420,7 @@ func UpdateSubscriptionByID(id int64, url, label string) error {
 	if existingSub == nil {
 		return fmt.Errorf("订阅不存在")
 	}
-	
+
 	// 更新订阅信息
 	_, err = DB.Exec(
 		"UPDATE subscriptions SET url = ?, label = ?, updated_at = ? WHERE id = ?",
@@ -430,7 +429,7 @@ func UpdateSubscriptionByID(id int64, url, label string) error {
 	if err != nil {
 		return fmt.Errorf("更新订阅失败: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -556,7 +555,7 @@ func GetServer(id string) (*Node, error) {
 
 	server.Selected = intToBool(selected)
 	server.Enabled = intToBool(enabled)
-	
+
 	// 如果 ProtocolType 为空，设置默认值
 	if server.ProtocolType == "" {
 		server.ProtocolType = "socks5"
@@ -598,12 +597,12 @@ func GetAllServers() ([]Node, error) {
 
 		server.Selected = intToBool(selected)
 		server.Enabled = intToBool(enabled)
-		
+
 		// 如果 ProtocolType 为空，设置默认值
 		if server.ProtocolType == "" {
 			server.ProtocolType = "socks5"
 		}
-		
+
 		servers = append(servers, server)
 	}
 
@@ -651,12 +650,12 @@ func GetServersBySubscriptionID(subscriptionID int64) ([]Node, error) {
 
 		server.Selected = intToBool(selected)
 		server.Enabled = intToBool(enabled)
-		
+
 		// 如果 ProtocolType 为空，设置默认值
 		if server.ProtocolType == "" {
 			server.ProtocolType = "socks5"
 		}
-		
+
 		servers = append(servers, server)
 	}
 

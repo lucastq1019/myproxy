@@ -11,22 +11,22 @@ import (
 // 注意：GUI 应用使用数据库存储服务器和订阅信息，此配置主要用于日志和自动代理设置。
 type Config struct {
 	// Servers                  []Server `json:"servers"`                  // 服务器列表（保留用于向后兼容，GUI 应用主要使用数据库）
-	SelectedServerID         string   `json:"selectedServerID"`         // 当前选中的服务器ID
-	SelectedSubscriptionID   int64    `json:"selectedSubscriptionID"`   // 当前选中的订阅ID，0表示全部
-	AutoProxyEnabled         bool     `json:"autoProxyEnabled"`         // 自动代理是否启用
-	AutoProxyPort            int      `json:"autoProxyPort"`            // 自动代理监听端口
-	LogLevel                 string   `json:"logLevel"`                 // 日志级别
-	LogFile                  string   `json:"logFile"`                  // 日志文件路径
+	SelectedServerID       string `json:"selectedServerID"`       // 当前选中的服务器ID
+	SelectedSubscriptionID int64  `json:"selectedSubscriptionID"` // 当前选中的订阅ID，0表示全部
+	AutoProxyEnabled       bool   `json:"autoProxyEnabled"`       // 自动代理是否启用
+	AutoProxyPort          int    `json:"autoProxyPort"`          // 自动代理监听端口
+	LogLevel               string `json:"logLevel"`               // 日志级别
+	LogFile                string `json:"logFile"`                // 日志文件路径
 }
 
 // DefaultConfig 返回默认的应用配置。
 // 返回：包含默认值的配置实例
 func DefaultConfig() *Config {
 	return &Config{
-		AutoProxyEnabled:       false,
-		AutoProxyPort:          1080,
-		LogLevel:               "info",
-		LogFile:                "myproxy.log",
+		AutoProxyEnabled: false,
+		AutoProxyPort:    1080,
+		LogLevel:         "info",
+		LogFile:          "myproxy.log",
 		// Servers:                []Server{},
 		SelectedServerID:       "",
 		SelectedSubscriptionID: 0, // 默认显示全部订阅的服务器

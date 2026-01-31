@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -27,10 +28,14 @@ const (
 	ThemeDark = "dark"
 	// ThemeLight 浅色主题值
 	ThemeLight = "light"
+	// ThemeSystem 跟随系统主题值
+	ThemeSystem = "system"
 	// ThemeDisplayDark 深色主题显示文本
 	ThemeDisplayDark = "深色"
 	// ThemeDisplayLight 浅色主题显示文本
 	ThemeDisplayLight = "浅色"
+	// ThemeDisplaySystem 跟随系统主题显示文本
+	ThemeDisplaySystem = "跟随系统"
 )
 
 func (m SettingsMenu) String() string {
@@ -67,7 +72,7 @@ type SettingsPage struct {
 // NewSettingsPage 创建设置页面实例。
 func NewSettingsPage(appState *AppState) *SettingsPage {
 	sp := &SettingsPage{
-		appState:   appState,
+		appState:    appState,
 		currentMenu: SettingsMenuAppearance,
 	}
 	return sp
@@ -152,19 +157,65 @@ func (sp *SettingsPage) updateMenuState() {
 	}
 }
 
+// buildThemePreview 构建主题预览区域
+func buildThemePreview() fyne.CanvasObject {
+	// 创建预览卡片
+	previewCard := container.NewVBox(
+		// 预览标题
+		widget.NewLabelWithStyle("主题预览", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewSeparator(),
+
+		// 预览元素：按钮
+		widget.NewLabel("按钮预览"),
+		container.NewHBox(
+			widget.NewButton("普通按钮", nil),
+			widget.NewButtonWithIcon("图标按钮", theme.InfoIcon(), nil),
+		),
+
+		// 预览元素：输入框
+		widget.NewLabel("输入框预览"),
+		func() *widget.Entry {
+			entry := widget.NewEntry()
+			entry.SetPlaceHolder("请输入内容...")
+			return entry
+		}(),
+
+		// 预览元素：复选框
+		widget.NewLabel("复选框预览"),
+		widget.NewCheck("选项 1", nil),
+
+		// 预览元素：标签
+		widget.NewLabel("文本预览：这是一段示例文本"),
+	)
+
+	// 添加边框和内边距
+	previewCard = container.NewPadded(previewCard)
+
+	// 创建一个带有最小大小的容器
+	minSizeContainer := container.NewMax(previewCard)
+	minSizeContainer.Resize(fyne.NewSize(0, 200))
+
+	return minSizeContainer
+}
+
 // buildAppearanceContent 构建设置「外观」内容区。
 func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
-	themeOptions := []string{ThemeDisplayDark, ThemeDisplayLight}
+	themeOptions := []string{ThemeDisplayDark, ThemeDisplayLight, ThemeDisplaySystem}
 	themeSelect := widget.NewSelect(themeOptions, func(s string) {
 		sp.onThemeChanged(s)
 	})
-	
+
 	// 根据当前配置设置选中项
 	currentThemeDisplay := ThemeDisplayDark
 	if sp.appState != nil && sp.appState.ConfigService != nil {
 		t := sp.appState.ConfigService.GetTheme()
-		if t == ThemeLight {
+		switch t {
+		case ThemeLight:
 			currentThemeDisplay = ThemeDisplayLight
+		case ThemeSystem:
+			currentThemeDisplay = ThemeDisplaySystem
+		default:
+			currentThemeDisplay = ThemeDisplayDark
 		}
 	}
 	themeSelect.SetSelected(currentThemeDisplay)
@@ -175,8 +226,12 @@ func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
 		container.NewVBox(
 			widget.NewLabel("主题"),
 			themeSelect,
-			widget.NewLabel(ThemeDisplayDark + " / " + ThemeDisplayLight),
+			widget.NewLabel(ThemeDisplayDark+" / "+ThemeDisplayLight+" / "+ThemeDisplaySystem),
 		),
+
+		// 添加主题预览区域
+		widget.NewSeparator(),
+		buildThemePreview(),
 	)
 }
 
@@ -398,6 +453,13 @@ func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 	)
 }
 
+// getSystemThemeVariant 获取系统主题变体
+func getSystemThemeVariant() fyne.ThemeVariant {
+	// 在 Fyne 中，默认的系统主题检测会通过 Settings().ThemeVariant() 提供
+	// 这里我们直接返回，让 Fyne 处理系统主题检测
+	return theme.VariantDark // 默认返回深色，实际会被系统主题覆盖
+}
+
 // onThemeChanged 主题变更回调。
 func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 	if sp.appState == nil || sp.appState.App == nil {
@@ -408,6 +470,8 @@ func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 	newTheme := ThemeDark
 	if selectedDisplay == ThemeDisplayLight {
 		newTheme = ThemeLight
+	} else if selectedDisplay == ThemeDisplaySystem {
+		newTheme = ThemeSystem
 	}
 
 	// 保存主题配置
@@ -419,22 +483,39 @@ func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 	variant := theme.VariantDark
 	if newTheme == ThemeLight {
 		variant = theme.VariantLight
+	} else if newTheme == ThemeSystem {
+		// 跟随系统主题
+		variant = sp.appState.App.Settings().ThemeVariant()
 	}
 	sp.appState.App.Settings().SetTheme(NewMonochromeTheme(variant))
 
-	// 延迟到下一帧执行，确保主题已写入 Settings，再强制重绘整棵控件树。
+	// 平滑主题切换动画
+	// 使用 fyne.Do 确保在 UI 线程执行
 	w := sp.appState.Window
-	fyne.Do(func() {
-		if w == nil {
-			return
+	if w != nil {
+		// 首先刷新当前设置页面，让主题选择器立即更新
+		if sp.content != nil {
+			sp.content.Refresh()
 		}
-		content := w.Canvas().Content()
-		w.SetContent(content)
-		// 部分 Fyne 版本对同引用 SetContent 可能不触发重绘，再显式刷新一次
-		if c := w.Canvas(); c != nil {
-			c.Refresh(content)
-		}
-	})
+
+		// 延迟一点时间，然后刷新整个窗口，确保主题变更完全生效
+		go func() {
+			// 短暂延迟，让主题设置有时间生效
+			<-time.After(50 * time.Millisecond)
+
+			fyne.Do(func() {
+				content := w.Canvas().Content()
+				if content != nil {
+					// 重新设置内容以触发完整的主题刷新
+					w.SetContent(content)
+					// 显式刷新画布
+					if c := w.Canvas(); c != nil {
+						c.Refresh(content)
+					}
+				}
+			})
+		}()
+	}
 }
 
 // onLogLevelChanged 日志级别变更回调。

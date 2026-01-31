@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -12,6 +13,22 @@ import (
 type MonochromeTheme struct {
 	variant fyne.ThemeVariant
 }
+
+// 品牌色定义
+const (
+	// BrandPrimary 主品牌色
+	BrandPrimary = "#3B82F6"
+	// BrandSecondary 次要品牌色
+	BrandSecondary = "#10B981"
+	// BrandAccent 强调色
+	BrandAccent = "#8B5CF6"
+	// BrandError 错误色
+	BrandError = "#EF4444"
+	// BrandWarning 警告色
+	BrandWarning = "#F59E0B"
+	// BrandInfo 信息色
+	BrandInfo = "#3B82F6"
+)
 
 // NewMonochromeTheme 创建黑白主题实例。
 // 参数：
@@ -39,6 +56,20 @@ func CurrentThemeColor(app fyne.App, name fyne.ThemeColorName) color.Color {
 	return t.Color(name, variant)
 }
 
+// hexToRGBA 将十六进制颜色转换为 RGBA
+func hexToRGBA(hex string) color.NRGBA {
+	var r, g, b uint8
+	var a uint8 = 255
+
+	if len(hex) == 7 {
+		fmt.Sscanf(hex[1:], "%02x%02x%02x", &r, &g, &b)
+	} else if len(hex) == 9 {
+		fmt.Sscanf(hex[1:], "%02x%02x%02x%02x", &r, &g, &b, &a)
+	}
+
+	return color.NRGBA{R: r, G: g, B: b, A: a}
+}
+
 // Color 返回自定义颜色，未覆盖的颜色使用默认主题
 func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	// 以传入 variant 优先，其次使用主题自身 variant
@@ -58,22 +89,29 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 		case theme.ColorNameButton:
 			return color.NRGBA{R: 45, G: 45, B: 45, A: 255} // 按钮背景，与输入框区分
 		case theme.ColorNamePrimary:
-			// MediumImportance 按钮使用此颜色，加深20%使其更突出
-			// 原色：R:255, G:255, B:255 (白色)
-			// 加深20%：255 * 0.8 = 204，但由于是白色，加深意味着降低亮度
-			// 实际上，对于白色来说，加深20%意味着使用更深的灰色
-			// 为了保持对比度，我们使用一个更深的灰色：255 * 0.7 = 178.5 ≈ 179
-			return color.NRGBA{R: 204, G: 204, B: 204, A: 255} // 主要元素（MediumImportance按钮）使用加深20%的颜色
+			return hexToRGBA(BrandPrimary) // 使用品牌色作为主要元素颜色
 		case theme.ColorNameFocus:
-			return color.NRGBA{R: 255, G: 255, B: 255, A: 128} // 焦点高亮，更明显
+			return hexToRGBA(BrandPrimary + "80") // 品牌色半透明作为焦点高亮
 		case theme.ColorNameHover:
-			return color.NRGBA{R: 255, G: 255, B: 255, A: 80} // 悬停效果，适中
+			return hexToRGBA(BrandPrimary + "50") // 品牌色更透明作为悬停效果
 		case theme.ColorNameDisabled:
 			return color.NRGBA{R: 100, G: 100, B: 100, A: 255} // 禁用状态，降低对比
 		case theme.ColorNamePlaceHolder:
 			return color.NRGBA{R: 140, G: 140, B: 140, A: 255} // 占位符文字
 		case theme.ColorNameSelection:
-			return color.NRGBA{R: 255, G: 255, B: 255, A: 100} // 选中状态
+			return hexToRGBA(BrandPrimary + "64") // 品牌色半透明作为选中状态
+		case theme.ColorNameSeparator:
+			return color.NRGBA{R: 60, G: 60, B: 60, A: 255} // 分隔线
+		case theme.ColorNameSuccess:
+			return hexToRGBA(BrandSecondary) // 成功色
+		case theme.ColorNameWarning:
+			return hexToRGBA(BrandWarning) // 警告色
+		case theme.ColorNameError:
+			return hexToRGBA(BrandError) // 错误色
+		case theme.ColorNameHeaderBackground:
+			return color.NRGBA{R: 30, G: 30, B: 30, A: 255} // 标题背景
+		case theme.ColorNameHyperlink:
+			return hexToRGBA(BrandPrimary) // 超链接
 		}
 	case theme.VariantLight:
 		switch name {
@@ -86,23 +124,29 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 		case theme.ColorNameButton:
 			return color.NRGBA{R: 245, G: 245, B: 245, A: 255} // 浅灰按钮背景，更柔和
 		case theme.ColorNamePrimary:
-			// MediumImportance 按钮使用此颜色，加深20%使其更突出
-			// 原色：R:30, G:30, B:30 (深灰色)
-			// 加深20%：30 * 0.8 = 24，但由于是深色，加深意味着更深的黑色
-			// 实际上，对于深色来说，加深20%意味着更接近黑色
-			// 计算：30 * 0.8 = 24，但我们想要更明显的加深效果
-			// 使用更深的颜色：R:24, G:24, B:24
-			return color.NRGBA{R: 24, G: 24, B: 24, A: 255} // 主要元素（MediumImportance按钮）使用加深20%的颜色
+			return hexToRGBA(BrandPrimary) // 使用品牌色作为主要元素颜色
 		case theme.ColorNameFocus:
-			return color.NRGBA{R: 0, G: 0, B: 0, A: 120} // 焦点高亮，更明显
+			return hexToRGBA(BrandPrimary + "78") // 品牌色半透明作为焦点高亮
 		case theme.ColorNameHover:
-			return color.NRGBA{R: 0, G: 0, B: 0, A: 80} // 悬停效果，更明显
+			return hexToRGBA(BrandPrimary + "50") // 品牌色更透明作为悬停效果
 		case theme.ColorNameDisabled:
 			return color.NRGBA{R: 180, G: 180, B: 180, A: 255} // 禁用状态
 		case theme.ColorNamePlaceHolder:
 			return color.NRGBA{R: 150, G: 150, B: 150, A: 255} // 占位符文字
 		case theme.ColorNameSelection:
-			return color.NRGBA{R: 0, G: 0, B: 0, A: 100} // 选中状态，更明显
+			return hexToRGBA(BrandPrimary + "64") // 品牌色半透明作为选中状态
+		case theme.ColorNameSeparator:
+			return color.NRGBA{R: 220, G: 220, B: 220, A: 255} // 分隔线
+		case theme.ColorNameSuccess:
+			return hexToRGBA(BrandSecondary) // 成功色
+		case theme.ColorNameWarning:
+			return hexToRGBA(BrandWarning) // 警告色
+		case theme.ColorNameError:
+			return hexToRGBA(BrandError) // 错误色
+		case theme.ColorNameHeaderBackground:
+			return color.NRGBA{R: 248, G: 248, B: 248, A: 255} // 标题背景
+		case theme.ColorNameHyperlink:
+			return hexToRGBA(BrandPrimary) // 超链接
 		}
 	}
 
@@ -128,15 +172,15 @@ func (t *MonochromeTheme) Size(name fyne.ThemeSizeName) float32 {
 	case theme.SizeNameScrollBar:
 		return 16 // 滚动条宽度
 	case theme.SizeNameScrollBarSmall:
-		return 3  // 小滚动条
+		return 3 // 小滚动条
 	case theme.SizeNameSeparatorThickness:
-		return 1  // 分隔线更细
+		return 1 // 分隔线更细
 	case theme.SizeNameInputBorder:
-		return 1  // 输入框边框
+		return 1 // 输入框边框
 	case theme.SizeNameInputRadius:
-		return 6  // 输入框圆角，更圆润
+		return 6 // 输入框圆角，更圆润
 	case theme.SizeNameSelectionRadius:
-		return 6  // 选中圆角，更圆润
+		return 6 // 选中圆角，更圆润
 	case theme.SizeNameInlineIcon:
 		return 20 // 内联图标
 	}

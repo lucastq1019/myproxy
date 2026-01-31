@@ -16,6 +16,7 @@ cmd/gui/                 # 唯一入口
 internal/
   config/                # 配置定义
   database/              # SQLite封装（数据库访问层）
+  error/                 # 结构化错误系统
   logging/               # 日志管理
   model/                 # 数据模型层
   service/               # 业务逻辑层（Service层）
@@ -41,18 +42,24 @@ config.json              # 运行时配置
 ├─────────────────────────────────────┤
 │      Service Layer (service/)       │  ← 业务逻辑层
 │  - ServerService                    │
-│  - SubscriptionService               │
-│  - ConfigService                     │
-│  - ProxyService                      │
+│  - SubscriptionService              │
+│  - ConfigService                    │
+│  - ProxyService                     │
+│  - XrayControlService               │
 ├─────────────────────────────────────┤
 │      Store Layer (store/)           │  ← 数据访问和绑定管理
 │  - NodesStore                       │
 │  - SubscriptionsStore               │
 │  - ConfigStore                      │
+│  - ProxyStatusStore                 │
+│  - AppConfigStore                   │
+│  - LayoutStore                      │
 ├─────────────────────────────────────┤
 │   Database Layer (database/)        │  ← 数据库访问
 ├─────────────────────────────────────┤
 │      Model Layer (model/)           │  ← 数据模型
+├─────────────────────────────────────┤
+│      Error Layer (error/)           │  ← 结构化错误系统
 └─────────────────────────────────────┘
 ```
 
@@ -61,17 +68,17 @@ config.json              # 运行时配置
 **严格遵循以下依赖规则**：
 
 1. **UI 层 (ui/)**：
-   - ✅ 可以依赖：Service 层、Store 层、Model 层
+   - ✅ 可以依赖：Service 层、Store 层、Model 层、Error 层
    - ❌ 禁止直接依赖：Database 层
    - 职责：只负责 UI 展示和事件转发，不包含业务逻辑
 
 2. **Service 层 (service/)**：
-   - ✅ 可以依赖：Store 层、Model 层
+   - ✅ 可以依赖：Store 层、Model 层、Error 层
    - ❌ 禁止依赖：UI 层、Database 层（通过 Store 访问）
    - 职责：包含业务逻辑，协调 Store 层完成业务操作
 
 3. **Store 层 (store/)**：
-   - ✅ 可以依赖：Database 层、Model 层
+   - ✅ 可以依赖：Database 层、Model 层、Error 层
    - ❌ 禁止依赖：UI 层、Service 层
    - 职责：数据访问和双向绑定管理，不包含业务逻辑
 
@@ -84,7 +91,11 @@ config.json              # 运行时配置
    - ✅ 不依赖任何层（纯数据结构）
    - 职责：定义数据模型，供各层使用
 
-6. **工具层 (utils/, subscription/, xray/, systemproxy/)**：
+6. **Error 层 (error/)**：
+   - ✅ 不依赖任何层（纯错误定义）
+   - 职责：定义错误代码和错误包装工具
+
+7. **工具层 (utils/, subscription/, xray/, systemproxy/)**：
    - ✅ 可以依赖：Model 层
    - ❌ 禁止依赖：UI 层、Service 层、Store 层、Database 层
    - 职责：提供独立的功能模块，不涉及数据更新
@@ -119,7 +130,7 @@ config.json              # 运行时配置
    - **App 退出时**：如果实例存在，停止并销毁
 
 4. **xray 与 Service 层关系**：
-   - `ProxyService` 通过 `AppState.XrayInstance` 访问 xray 实例（可能为 nil）
+   - `ProxyService` 和 `XrayControlService` 通过 `AppState.XrayInstance` 访问 xray 实例（可能为 nil）
    - Service 层提供业务方法（如 `StartProxy(node)`），内部操作 App 临时持有的 xray 实例
 
 ### 数据访问规则
@@ -174,6 +185,182 @@ config.json              # 运行时配置
    - 避免在构造函数中传入其他 Service 的依赖
    - 工具类（如 `utils.Ping`）应该无状态，不需要依赖注入
    - 如果确实需要依赖，应该通过方法参数传递，而不是结构体字段
+
+### 架构改进要点
+
+1. **初始化状态检查**：
+   - 所有核心组件（Store、AppState、Service）都应添加初始化状态标记
+   - 防止重复初始化导致的资源泄露和冲突
+   - 提供 `IsInitialized()` 和 `Reset()` 方法
+
+2. **统一错误处理**：
+   - 使用 `error` 包实现结构化错误系统
+   - 定义错误代码常量，方便错误分类和处理
+   - 使用 `error.Wrap()` 包装错误，保留错误链
+   - 错误消息使用中文，便于用户理解
+
+3. **接口隔离**：
+   - 定义清晰的接口，提高代码可测试性和可维护性
+   - 为核心组件（ServerService、SubscriptionService、ConfigService 等）定义接口
+   - 接口应简洁明了，只包含必要的方法
+
+4. **并发安全**：
+   - Store 层应添加读写锁，确保并发安全
+   - 保护节点和订阅数据的并发访问
+   - 使用 `sync.RWMutex` 优化读多写少的场景
+
+5. **日志系统增强**：
+   - 添加 `SafeLogger`，处理未初始化的日志记录器
+   - 提供安全的日志记录接口，防止 nil 指针异常
+   - 支持日志回调，实现日志实时更新到 UI
+
+6. **资源管理**：
+   - 改进 `Cleanup` 方法，确保资源正确释放
+   - 清理 Xray 实例、Logger、Store 和服务层资源
+   - 使用 `defer` 确保资源释放
+
+7. **应用工厂模式**：
+   - 使用 `ApplicationFactory` 集中管理应用组件的创建和初始化
+   - 确保依赖关系正确，初始化顺序合理
+   - 提供统一的应用初始化入口
+
+8. **页面导航**：
+   - AppState 应持有 MainWindow 实例，方便页面导航
+   - 实现页面栈管理，支持返回操作
+   - 页面组件应通过 MainWindow 访问其他页面
+
+### 接口定义
+
+#### Service 层接口
+
+```go
+// ServerServiceInterface 定义服务器服务接口
+type ServerServiceInterface interface {
+    GetAllServers() ([]*model.Node, error)
+    GetServerByID(id string) (*model.Node, error)
+    GetServersBySubscriptionID(subscriptionID int64) ([]model.Node, error)
+    UpdateServerDelay(id string, delay int) error
+    DeleteServer(id string) error
+    AddOrUpdateServer(node model.Node, subscriptionID *int64) error
+    ListServers() []model.Node
+    GetSelectedSubscriptionID() int64
+    SetSelectedSubscriptionID(subscriptionID int64)
+}
+
+// SubscriptionServiceInterface 定义订阅服务接口
+type SubscriptionServiceInterface interface {
+    GetAllSubscriptions() ([]*database.Subscription, error)
+    GetSubscriptionByID(id int64) (*database.Subscription, error)
+    GetSubscriptionByURL(url string) (*database.Subscription, error)
+    AddSubscription(url, label string) (*database.Subscription, error)
+    UpdateSubscription(id int64, url, label string) error
+    DeleteSubscription(id int64) error
+    UpdateSubscriptionByID(id int64) error
+    FetchSubscription(url string, label ...string) error
+}
+
+// ConfigServiceInterface 定义配置服务接口
+type ConfigServiceInterface interface {
+    GetConfig() (*config.Config, error)
+    SaveConfig(config *config.Config) error
+    LoadConfig() (*config.Config, error)
+    GetDefaultConfig() *config.Config
+}
+
+// ProxyServiceInterface 定义代理服务接口
+type ProxyServiceInterface interface {
+    StartProxy(node *model.Node) error
+    StopProxy() error
+    RestartProxy(node *model.Node) error
+    UpdateXrayInstance(instance *xray.XrayInstance)
+}
+
+// XrayControlServiceInterface 定义 Xray 控制服务接口
+type XrayControlServiceInterface interface {
+    StartProxy(instance *xray.XrayInstance, logPath string) *XrayControlResult
+    StopProxy(instance *xray.XrayInstance) error
+    RestartProxy(instance *xray.XrayInstance, logPath string) *XrayControlResult
+}
+```
+
+#### Store 层接口
+
+```go
+// NodesStoreInterface 定义节点存储接口
+type NodesStoreInterface interface {
+    Load() error
+    GetAll() []*model.Node
+    Get(id string) (*model.Node, error)
+    Select(id string) error
+    UpdateDelay(id string, delay int) error
+    Delete(id string) error
+    Add(node *model.Node) error
+    Update(node *model.Node) error
+    GetBySubscriptionID(subscriptionID int64) ([]*model.Node, error)
+    GetSelected() *model.Node
+    IsInitialized() bool
+    Reset()
+}
+
+// SubscriptionsStoreInterface 定义订阅存储接口
+type SubscriptionsStoreInterface interface {
+    Load() error
+    GetAll() []*database.Subscription
+    Get(id int64) (*database.Subscription, error)
+    GetByURL(url string) (*database.Subscription, error)
+    Add(url, label string) (*database.Subscription, error)
+    Update(id int64, url, label string) error
+    Delete(id int64) error
+    UpdateByID(id int64) error
+    Fetch(url string, label ...string) error
+    IsInitialized() bool
+    Reset()
+}
+
+// AppConfigStoreInterface 定义应用配置存储接口
+type AppConfigStoreInterface interface {
+    Get(key string) (string, error)
+    Set(key, value string) error
+    GetWithDefault(key, defaultValue string) (string, error)
+    SaveWindowSize(size fyne.Size)
+    GetWindowSize(defaultSize fyne.Size) fyne.Size
+}
+
+// LayoutStoreInterface 定义布局配置存储接口
+type LayoutStoreInterface interface {
+    Get() *LayoutConfig
+    Save(config *LayoutConfig) error
+    Load() error
+}
+
+// ProxyStatusStoreInterface 定义代理状态存储接口
+type ProxyStatusStoreInterface interface {
+    UpdateProxyStatus(xrayInstance *xray.XrayInstance, nodesStore *NodesStore)
+    GetProxyStatus() string
+    GetPort() string
+    GetServerName() string
+}
+```
+
+### 错误代码定义
+
+```go
+// 错误代码常量
+const (
+    ErrCodeNone             = "NONE"             // 无错误
+    ErrCodeInit             = "INIT"             // 初始化错误
+    ErrCodeDatabase         = "DATABASE"         // 数据库错误
+    ErrCodeInternal         = "INTERNAL"         // 内部错误
+    ErrCodeInvalidInput     = "INVALID_INPUT"    // 无效输入
+    ErrCodeNotFound         = "NOT_FOUND"        // 资源不存在
+    ErrCodeSubscription     = "SUBSCRIPTION"     // 订阅错误
+    ErrCodeSubscriptionFetch = "SUBSCRIPTION_FETCH" // 订阅获取错误
+    ErrCodeProxy            = "PROXY"            // 代理错误
+    ErrCodeSystemProxy      = "SYSTEM_PROXY"     // 系统代理错误
+    ErrCodeXray             = "XRAY"             // Xray 错误
+    ErrCodeAlreadyInit      = "ALREADY_INIT"     // 已经初始化
+)
+```
 
 ## 启动命令
 
@@ -268,7 +455,8 @@ type TypeName struct {
 ```
 
 错误处理:
-- 使用 `fmt.Errorf("描述: %w", err)`
+- 使用 `error.Wrap(err, error.ErrCodeInternal, "描述")`
+- 使用 `error.New(error.ErrCodeNotFound, "描述")`
 - 错误消息使用中文
 
 JSON标签: camelCase (`json:"protocol_type"`, `json:"vmess_uuid,omitempty"`)
@@ -302,6 +490,7 @@ JSON标签: camelCase (`json:"protocol_type"`, `json:"vmess_uuid,omitempty"`)
 - 使用 `internal/logging` 包
 - 级别: debug, info, warn, error, fatal
 - 输出到文件和UI面板
+- 优先使用 `SafeLogger`，防止 nil 指针异常
 
 配置:
 - 优先从数据库读取
@@ -322,6 +511,7 @@ UI:
 并发:
 - UI操作必须在主goroutine
 - 使用通道或回调在goroutine间通信
+- Store 层应添加读写锁，确保并发安全
 
 ## 测试
 

@@ -280,4 +280,3 @@ func (p *DarwinProxy) removeOldSourceLine(content string) string {
 
 	return strings.Join(newLines, "\n")
 }
-
