@@ -4,19 +4,11 @@ import (
 	"fyne.io/fyne/v2"
 )
 
-// CustomBorderLayout 实现自定义 Border 布局，支持通过百分比精确控制顶部和底部区域的高度。
-// 这允许实现固定比例的区域划分，例如顶部 20%、底部 5%、中间 75%。
 type CustomBorderLayout struct {
-	topHeightPercent    float64 // 顶部高度百分比 (0.0-1.0)
-	bottomHeightPercent float64 // 底部高度百分比 (0.0-1.0)
+	topHeightPercent    float64
+	bottomHeightPercent float64
 }
 
-// NewCustomBorderLayout 创建自定义 Border 布局实例。
-// 参数：
-//   - topPercent: 顶部区域高度百分比（0.0-1.0），例如 0.2 表示 20%
-//   - bottomPercent: 底部区域高度百分比（0.0-1.0），例如 0.05 表示 5%
-//
-// 返回：布局实例
 func NewCustomBorderLayout(topPercent, bottomPercent float64) *CustomBorderLayout {
 	return &CustomBorderLayout{
 		topHeightPercent:    topPercent,
@@ -24,13 +16,10 @@ func NewCustomBorderLayout(topPercent, bottomPercent float64) *CustomBorderLayou
 	}
 }
 
-// Layout 实现布局方法
 func (c *CustomBorderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
-	// 使用 defer recover 来捕获可能的 panic，防止窗口移动时崩溃
 	defer func() {
 		if r := recover(); r != nil {
-			// 如果布局时出现 panic（可能在窗口移动时发生），静默处理
-			// 这可以防止应用崩溃
+			_ = r
 		}
 	}()
 

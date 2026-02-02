@@ -105,7 +105,7 @@ func (sp *SubscriptionPage) loadSubscriptions() {
 }
 
 func (sp *SubscriptionPage) getSubscriptionCount() int {
-	return sp.appState.Store.Subscriptions.GetAllNodeCount()
+	return sp.appState.Store.Subscriptions.GetSubscriptionCount()
 }
 
 func (sp *SubscriptionPage) createSubscriptionItem() fyne.CanvasObject {

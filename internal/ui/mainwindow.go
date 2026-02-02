@@ -608,7 +608,7 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	// 顶部标题栏：右侧仅保留设置入口
 	headerButtons := container.NewHBox(
 		layout.NewSpacer(),
-		NewStyledButton("设置", theme.SettingsIcon(), func() {
+		NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
 			mw.ShowSettingsPage()
 		}),
 	)

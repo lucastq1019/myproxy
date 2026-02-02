@@ -125,13 +125,13 @@ func (lp *LogsPanel) Build() fyne.CanvasObject {
 	titleLabel := NewTitleLabel("日志")
 
 	// 级别标签（使用副标题样式）
-	levelLabel := NewSubtitleLabel("级别")
+	levelLabel := widget.NewLabel("级别")
 
 	// 类型标签（使用副标题样式）
-	typeLabel := NewSubtitleLabel("类型")
+	typeLabel := widget.NewLabel("类型")
 
 	// 刷新按钮 - 添加图标
-	refreshBtn := NewStyledButton("刷新", theme.ViewRefreshIcon(), func() {
+	refreshBtn := NewButtonWithIcon("刷新", theme.ViewRefreshIcon(), func() {
 		lp.loadInitialLogs()
 	})
 
