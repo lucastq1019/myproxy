@@ -12,7 +12,7 @@ type TrayManager struct {
 	appState           *AppState
 	app                fyne.App
 	window             fyne.Window
-	proxyModeMenuItems [3]*fyne.MenuItem // 系统代理模式菜单项（清除、系统、终端）
+	proxyModeMenuItems [2]*fyne.MenuItem // 系统代理模式菜单项（清除、系统）
 }
 
 // NewTrayManager 创建系统托盘管理器
@@ -70,12 +70,6 @@ func (tm *TrayManager) createTrayMenu(desk desktop.App) {
 				// SetSystemProxyMode 内部会调用 RefreshProxyModeMenu，这里不需要再次调用
 			}
 		})
-		tm.proxyModeMenuItems[2] = fyne.NewMenuItem(SystemProxyModeTerminal.ShortString(), func() {
-			if tm.appState != nil && tm.appState.MainWindow != nil {
-				_ = tm.appState.MainWindow.SetSystemProxyMode(SystemProxyModeTerminal)
-				// SetSystemProxyMode 内部会调用 RefreshProxyModeMenu，这里不需要再次调用
-			}
-		})
 	}
 
 	// 更新菜单项的选中状态
@@ -90,7 +84,6 @@ func (tm *TrayManager) createTrayMenu(desk desktop.App) {
 		fyne.NewMenuItemSeparator(),
 		tm.proxyModeMenuItems[0], // 清除代理
 		tm.proxyModeMenuItems[1], // 系统代理
-		tm.proxyModeMenuItems[2], // 终端代理
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("退出", func() {
 			tm.quit()
@@ -125,8 +118,6 @@ func (tm *TrayManager) updateProxyModeMenuCheckedState() {
 			item.Checked = (currentMode == SystemProxyModeClear)
 		case 1: // 系统代理
 			item.Checked = (currentMode == SystemProxyModeAuto)
-		case 2: // 终端代理
-			item.Checked = (currentMode == SystemProxyModeTerminal)
 		}
 	}
 }
@@ -152,8 +143,6 @@ func (tm *TrayManager) refreshProxyModeMenu() {
 			shouldBeChecked = (currentMode == SystemProxyModeClear)
 		case 1: // 系统代理
 			shouldBeChecked = (currentMode == SystemProxyModeAuto)
-		case 2: // 终端代理
-			shouldBeChecked = (currentMode == SystemProxyModeTerminal)
 		}
 		if item.Checked != shouldBeChecked {
 			needRefresh = true

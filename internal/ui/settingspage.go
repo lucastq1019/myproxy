@@ -43,7 +43,7 @@ func (m SettingsMenu) String() string {
 	case SettingsMenuAppearance:
 		return "外观"
 	case SettingsMenuDirectRoute:
-		return "直连路由"
+		return "代理配置"
 	case SettingsMenuLog:
 		return "日志"
 	case SettingsMenuAbout:
@@ -137,7 +137,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 
 	// 左侧菜单
 	sp.menuButtons[0] = widget.NewButton("外观", func() { sp.switchMenu(SettingsMenuAppearance) })
-	sp.menuButtons[1] = widget.NewButton("直连路由", func() { sp.switchMenu(SettingsMenuDirectRoute) })
+	sp.menuButtons[1] = widget.NewButton("代理配置", func() { sp.switchMenu(SettingsMenuDirectRoute) })
 	sp.menuButtons[2] = widget.NewButton("日志", func() { sp.switchMenu(SettingsMenuLog) })
 	sp.menuButtons[3] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
 
@@ -145,8 +145,14 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[i].Importance = widget.LowImportance
 	}
 
-	menuBox := container.NewVBox(sp.menuButtons[0], sp.menuButtons[1], sp.menuButtons[2], sp.menuButtons[3])
-	menuBox = container.NewPadded(menuBox)
+	// 将logo和菜单按钮组合在一起
+	menuContent := container.NewVBox(
+		sp.menuButtons[0],
+		sp.menuButtons[1],
+		sp.menuButtons[2],
+		sp.menuButtons[3],
+	)
+	menuBox := container.NewPadded(menuContent)
 
 	// 右侧内容区，使用 Scroll 包裹避免内容撑开窗口
 	sp.contentCard = container.NewMax()
@@ -203,14 +209,12 @@ func buildThemePreview() fyne.CanvasObject {
 		// 预览标题
 		widget.NewLabelWithStyle("主题预览", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
-
 		// 预览元素：按钮
 		widget.NewLabel("按钮预览"),
 		container.NewHBox(
 			widget.NewButton("普通按钮", nil),
 			widget.NewButtonWithIcon("图标按钮", theme.InfoIcon(), nil),
 		),
-
 		// 预览元素：输入框
 		widget.NewLabel("输入框预览"),
 		func() *widget.Entry {
@@ -218,11 +222,9 @@ func buildThemePreview() fyne.CanvasObject {
 			entry.SetPlaceHolder("请输入内容...")
 			return entry
 		}(),
-
 		// 预览元素：复选框
 		widget.NewLabel("复选框预览"),
 		widget.NewCheck("选项 1", nil),
-
 		// 预览元素：标签
 		widget.NewLabel("文本预览：这是一段示例文本"),
 	)
@@ -246,8 +248,8 @@ func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
 
 	// 根据当前配置设置选中项
 	currentThemeDisplay := ThemeDisplayDark
-	if sp.appState != nil && sp.appState.ConfigService != nil {
-		t := sp.appState.ConfigService.GetTheme()
+	if sp.appState != nil {
+		t := sp.appState.GetTheme()
 		switch t {
 		case ThemeLight:
 			currentThemeDisplay = ThemeDisplayLight
@@ -260,14 +262,8 @@ func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
 	themeSelect.SetSelected(currentThemeDisplay)
 
 	return container.NewVBox(
-		widget.NewLabelWithStyle("外观", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewSeparator(),
-		container.NewVBox(
-			widget.NewLabel("主题"),
-			themeSelect,
-			widget.NewLabel(ThemeDisplayDark+" / "+ThemeDisplayLight+" / "+ThemeDisplaySystem),
-		),
-
+		widget.NewLabel("主题"),
+		themeSelect,
 		// 添加主题预览区域
 		widget.NewSeparator(),
 		buildThemePreview(),
@@ -325,15 +321,31 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	})
 	resetBtn.Importance = widget.LowImportance
 
-	// 使用 Border 布局：顶部固定复选框和重置按钮，中间路由列表占满剩余空间，底部固定添加路由区域
-	topBar := container.NewHBox(sp.routeUseProxy, resetBtn, layout.NewSpacer())
+	// 终端代理配置选项
+	terminalProxyCheck := widget.NewCheck("终端代理", func(b bool) {
+		if sp.appState != nil && sp.appState.ConfigService != nil {
+			_ = sp.appState.ConfigService.SetTerminalProxyEnabled(b)
+		}
+	})
+	if sp.appState != nil && sp.appState.ConfigService != nil {
+		terminalProxyCheck.SetChecked(sp.appState.ConfigService.GetTerminalProxyEnabled())
+	}
+
+	// 代理配置区域：包含"终端代理"标题、"不走直连"、"重置"按钮
+	proxyConfigArea := container.NewVBox(
+		terminalProxyCheck,
+		widget.NewSeparator(),
+		container.NewHBox(sp.routeUseProxy, resetBtn, layout.NewSpacer()),
+	)
+
 	routesLabel := widget.NewLabel("路由列表")
-	
+
+	// 使用 Border 布局：顶部固定代理配置区域，中间路由列表占满剩余空间，底部固定添加路由区域
 	return container.NewBorder(
-		container.NewVBox(topBar, routesLabel), // 顶部：复选框+重置按钮 + "路由列表"标签
-		addArea,                                // 底部：添加路由输入框（placeholder已说明用途）
+		container.NewVBox(proxyConfigArea, routesLabel), // 顶部：代理配置区域 + "路由列表"标签
+		addArea,                                        // 底部：添加路由输入框
 		nil, nil,
-		listScroll,                            // 中间：路由列表占满剩余空间
+		listScroll, // 中间：路由列表占满剩余空间
 	)
 }
 
@@ -511,16 +523,16 @@ func (sp *SettingsPage) buildLogContent() fyne.CanvasObject {
 // buildAboutContent 构建设置「关于」内容区。
 func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 	titleLabel := widget.NewLabelWithStyle("关于", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	
+
 	versionLabel := widget.NewLabel("myproxy  版本 1.0.0")
 	versionLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
-	
+
 	descLabel := widget.NewLabel("轻量级代理管理工具，基于 Xray-core 与 Fyne")
 	descLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
-	
+
 	emailLabel := widget.NewLabel("邮箱: lucastq1019@gmail.com")
 	emailLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
-	
+
 	return container.NewVBox(
 		titleLabel,
 		widget.NewSeparator(),
@@ -551,20 +563,10 @@ func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 		newTheme = ThemeSystem
 	}
 
-	// 保存主题配置
-	if sp.appState.ConfigService != nil {
-		_ = sp.appState.ConfigService.SetTheme(newTheme)
+	// 保存并应用主题配置
+	if sp.appState != nil {
+		_ = sp.appState.SetTheme(newTheme)
 	}
-
-	// 应用主题到 Fyne
-	variant := theme.VariantDark
-	if newTheme == ThemeLight {
-		variant = theme.VariantLight
-	} else if newTheme == ThemeSystem {
-		// 跟随系统主题
-		variant = sp.appState.App.Settings().ThemeVariant()
-	}
-	sp.appState.App.Settings().SetTheme(NewMonochromeTheme(variant))
 
 	// 平滑主题切换动画
 	// 使用 fyne.Do 确保在 UI 线程执行

@@ -94,23 +94,8 @@ func (a *AppState) InitApp() error {
 		fmt.Println("警告: 应用图标创建失败")
 	}
 
-	themeStr := ThemeDark
-	if a.Store != nil && a.Store.AppConfig != nil {
-		if ts, err := a.Store.AppConfig.GetWithDefault("theme", ThemeDark); err == nil {
-			themeStr = ts
-		}
-	}
-
-	themeVariant := theme.VariantDark
-	switch themeStr {
-	case ThemeLight:
-		themeVariant = theme.VariantLight
-	case ThemeSystem:
-		themeVariant = a.App.Settings().ThemeVariant()
-	default:
-		themeVariant = theme.VariantDark
-	}
-	a.App.Settings().SetTheme(NewMonochromeTheme(themeVariant))
+	// 应用主题（从配置加载）
+	a.ApplyTheme()
 
 	a.Window = a.App.NewWindow("myproxy")
 
@@ -337,4 +322,49 @@ func (a *AppState) Run() {
 		defer a.Cleanup()
 		a.App.Run()
 	}
+}
+
+// GetTheme 获取主题配置。
+// 返回：主题变体（dark、light 或 system）
+func (a *AppState) GetTheme() string {
+	if a.ConfigService != nil {
+		return a.ConfigService.GetTheme()
+	}
+	return ThemeDark
+}
+
+// SetTheme 设置主题配置并应用到 Fyne App。
+// 参数：
+//   - themeStr: 主题变体（dark、light 或 system）
+//
+// 返回：错误（如果有）
+func (a *AppState) SetTheme(themeStr string) error {
+	// 保存配置
+	if a.ConfigService != nil {
+		if err := a.ConfigService.SetTheme(themeStr); err != nil {
+			return err
+		}
+	}
+
+	// 应用主题到 Fyne
+	if a.App != nil {
+		variant := theme.VariantDark
+		switch themeStr {
+		case ThemeLight:
+			variant = theme.VariantLight
+		case ThemeSystem:
+			variant = a.App.Settings().ThemeVariant()
+		default:
+			variant = theme.VariantDark
+		}
+		a.App.Settings().SetTheme(NewMonochromeTheme(variant))
+	}
+
+	return nil
+}
+
+// ApplyTheme 从配置加载并应用主题。
+func (a *AppState) ApplyTheme() {
+	themeStr := a.GetTheme()
+	_ = a.SetTheme(themeStr)
 }

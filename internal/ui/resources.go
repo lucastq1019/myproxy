@@ -17,9 +17,10 @@ import (
 
 var (
 	// 图标缓存
-	trayIconCache  fyne.Resource
-	appIconCache   fyne.Resource
-	iconCacheMutex sync.Mutex
+	trayIconCache     fyne.Resource
+	appIconCache      fyne.Resource
+	settingsLogoCache fyne.Resource
+	iconCacheMutex    sync.Mutex
 )
 
 // getIconDir 获取图标存储目录
@@ -65,17 +66,88 @@ func createTrayIconResource(appState *AppState) fyne.Resource {
 	return trayIconCache
 }
 
-// createLShapeIcon 创建下L形布局的图标（使用水滴形状）
+// createSettingsLogo 创建设置页面logo资源（64x64，根据主题变化）
+// 参数：
+//   - appState: 应用状态（用于获取主题配置）
+// 注意：logo颜色与主题色相同，背景色根据主题变化
+func createSettingsLogo(appState *AppState) fyne.Resource {
+	// 获取当前主题variant，确保文件名包含完整的主题信息
+	themeVariant := theme.VariantDark
+	themeStr := ThemeDark
+	if appState != nil {
+		themeStr = appState.GetTheme()
+		switch themeStr {
+		case ThemeLight:
+			themeVariant = theme.VariantLight
+		case ThemeSystem:
+			if appState.App != nil {
+				themeVariant = appState.App.Settings().ThemeVariant()
+			}
+		default:
+			themeVariant = theme.VariantDark
+		}
+	}
+	// 文件名包含主题字符串和variant信息，确保不同主题使用不同文件
+	variantStr := "dark"
+	if themeVariant == theme.VariantLight {
+		variantStr = "light"
+	}
+	fileName := fmt.Sprintf("settings-logo-%s-%s.png", themeStr, variantStr)
+	return createLShapeIconWithVariant(64, fileName, themeVariant)
+}
+
+// createHomeLogo 创建主页logo资源（32x32，根据主题变化）
+// 参数：
+//   - appState: 应用状态（用于获取主题配置）
+// 注意：logo颜色与主题色相反（light主题用dark色，dark主题用light色）
+func createHomeLogo(appState *AppState) fyne.Resource {
+	// 获取当前主题
+	currentTheme := ThemeDark
+	if appState != nil {
+		currentTheme = appState.GetTheme()
+	}
+
+	// 确定相反的主题variant
+	var oppositeVariant fyne.ThemeVariant
+	if currentTheme == ThemeLight {
+		oppositeVariant = theme.VariantDark
+	} else if currentTheme == ThemeSystem {
+		// 如果是系统主题，需要判断当前系统主题
+		if appState != nil && appState.App != nil {
+			systemVariant := appState.App.Settings().ThemeVariant()
+			if systemVariant == theme.VariantLight {
+				oppositeVariant = theme.VariantDark
+			} else {
+				oppositeVariant = theme.VariantLight
+			}
+		} else {
+			oppositeVariant = theme.VariantDark
+		}
+	} else {
+		// ThemeDark
+		oppositeVariant = theme.VariantLight
+	}
+
+	// 生成文件名，使用相反主题，包含variant信息确保不同主题使用不同文件
+	variantStr := "dark"
+	if oppositeVariant == theme.VariantLight {
+		variantStr = "light"
+	}
+	fileName := fmt.Sprintf("home-logo-%s-opposite-%s.png", currentTheme, variantStr)
+	return createLShapeIconWithVariant(32, fileName, oppositeVariant)
+}
+
+// createLShapeIconWithVariant 创建下L形布局的图标（使用指定的主题variant）
 // 参数：
 //   - size: 图标尺寸（正方形）
 //   - name: 资源名称
-//   - appState: 应用状态（用于获取主题配置）
-func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
+//   - variant: 主题变体（用于确定logo颜色）
+func createLShapeIconWithVariant(size int, name string, variant fyne.ThemeVariant) fyne.Resource {
 	// 检查文件是否已存在
 	iconDir := getIconDir()
 	iconPath := filepath.Join(iconDir, name)
 
-	// 如果文件存在，直接加载
+	// 如果文件存在，直接加载（文件名已包含主题信息，确保不同主题使用不同文件）
 	if _, err := os.Stat(iconPath); err == nil {
 		fmt.Printf("图标文件已存在，加载: %s\n", iconPath)
 		if data, err := os.ReadFile(iconPath); err == nil {
@@ -84,18 +156,9 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 		fmt.Printf("读取图标文件失败，重新生成: %v\n", err)
 	}
 
-	// 从主题获取背景色
-	// 从 ConfigService 读取主题配置，默认使用黑色主题
-	themeVariant := theme.VariantDark
-	if appState != nil && appState.ConfigService != nil {
-		if themeStr := appState.ConfigService.GetTheme(); themeStr == ThemeLight {
-			themeVariant = theme.VariantLight
-		}
-	}
-
 	// 创建主题实例并使用 Color 方法获取背景色
-	monochromeTheme := NewMonochromeTheme(themeVariant)
-	bgColorValue := monochromeTheme.Color(theme.ColorNameBackground, themeVariant)
+	monochromeTheme := NewMonochromeTheme(variant)
+	bgColorValue := monochromeTheme.Color(theme.ColorNameBackground, variant)
 
 	// 转换为 RGBA，失败时使用默认主题背景色
 	var bgColor color.RGBA
@@ -104,7 +167,7 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 	} else if rgba, ok := bgColorValue.(color.RGBA); ok {
 		bgColor = rgba
 	} else {
-		fallback := theme.DefaultTheme().Color(theme.ColorNameBackground, themeVariant)
+		fallback := theme.DefaultTheme().Color(theme.ColorNameBackground, variant)
 		r, g, b, a := fallback.RGBA()
 		bgColor = color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
 	}
@@ -132,6 +195,32 @@ func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
 
 	fmt.Printf("图标创建成功 (%s, %dx%d)，大小: %d 字节\n", name, size, size, buf.Len())
 	return fyne.NewStaticResource(name, buf.Bytes())
+}
+
+// createLShapeIcon 创建下L形布局的图标（使用水滴形状）
+// 参数：
+//   - size: 图标尺寸（正方形）
+//   - name: 资源名称
+//   - appState: 应用状态（用于获取主题配置）
+func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
+	// 从主题获取背景色
+	// 从 ConfigService 读取主题配置
+	themeVariant := theme.VariantDark
+	if appState != nil {
+		themeStr := appState.GetTheme()
+		switch themeStr {
+		case ThemeLight:
+			themeVariant = theme.VariantLight
+		case ThemeSystem:
+			// 如果是系统主题，需要判断当前系统主题
+			if appState.App != nil {
+				themeVariant = appState.App.Settings().ThemeVariant()
+			}
+		default:
+			themeVariant = theme.VariantDark
+		}
+	}
+	return createLShapeIconWithVariant(size, name, themeVariant)
 }
 
 // createIconImage 使用透明区域方式生成图标

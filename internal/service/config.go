@@ -266,6 +266,32 @@ func (cs *ConfigService) SetDirectRoutesUseProxy(useProxy bool) error {
 	return cs.store.AppConfig.Set("directRoutesUseProxy", val)
 }
 
+// GetTerminalProxyEnabled 获取是否启用终端代理配置。
+// 返回：是否启用终端代理配置
+func (cs *ConfigService) GetTerminalProxyEnabled() bool {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return false // 默认不启用
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("terminalProxyEnabled", "false")
+	return v == "true"
+}
+
+// SetTerminalProxyEnabled 设置是否启用终端代理配置。
+// 参数：
+//   - enabled: 是否启用终端代理配置
+//
+// 返回：错误（如果有）
+func (cs *ConfigService) SetTerminalProxyEnabled(enabled bool) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	val := "false"
+	if enabled {
+		val = "true"
+	}
+	return cs.store.AppConfig.Set("terminalProxyEnabled", val)
+}
+
 // parseDirectRoutes 从换行分隔的字符串解析直连路由列表。
 // 支持 domain:xxx、ip 或 cidr，纯域名会补全为 domain:xxx。
 func parseDirectRoutes(raw string) []string {

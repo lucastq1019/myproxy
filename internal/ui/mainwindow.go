@@ -15,20 +15,20 @@ import (
 	"myproxy.com/p/internal/systemproxy"
 )
 
-// proxyModeButtonLayout 自定义布局，确保三个按钮平分宽度
+// proxyModeButtonLayout 自定义布局，确保两个按钮平分宽度
 type proxyModeButtonLayout struct{}
 
 func (p *proxyModeButtonLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
-	if len(objects) != 3 {
+	if len(objects) != 2 {
 		return
 	}
 
-	// 三个按钮平分宽度，每个占 1/3
+	// 两个按钮平分宽度，每个占 1/2
 	// 使用较小的间距，Mac 简约风格
 	spacing := float32(4)       // 按钮之间的间距
-	totalSpacing := spacing * 2 // 两个间距
+	totalSpacing := spacing * 1 // 一个间距
 	availableWidth := containerSize.Width - totalSpacing
-	buttonWidth := availableWidth / 3
+	buttonWidth := availableWidth / 2
 
 	for i, obj := range objects {
 		if obj != nil {
@@ -41,11 +41,11 @@ func (p *proxyModeButtonLayout) Layout(objects []fyne.CanvasObject, containerSiz
 }
 
 func (p *proxyModeButtonLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
-	if len(objects) < 3 {
+	if len(objects) < 2 {
 		return fyne.NewSize(0, 0)
 	}
 
-	// 最小宽度：三个按钮的最小宽度之和
+	// 最小宽度：两个按钮的最小宽度之和
 	minWidth := float32(0)
 	minHeight := float32(0)
 	for _, obj := range objects {
@@ -58,7 +58,7 @@ func (p *proxyModeButtonLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 		}
 	}
 	// 加上按钮间距
-	minWidth += 2 * 4 // 两个间距
+	minWidth += 1 * 4 // 一个间距
 
 	return fyne.NewSize(minWidth, minHeight)
 }
@@ -328,10 +328,12 @@ type MainWindow struct {
 	subscriptionPage         fyne.CanvasObject // 订阅管理页面
 	subscriptionPageInstance *SubscriptionPage // 订阅管理页面实例
 
+	homeLogoIcon *widget.Icon // 主页logo图标，用于主题变化时更新
+
 	// 主界面状态UI组件（使用双向绑定）
 	mainToggleButton *CircularButton          // 主开关按钮（连接/断开，圆形，替代了状态显示）
 	serverNameLabel  *widget.Label            // 服务器名称标签（绑定到 ServerNameBinding）
-	proxyModeButtons [3]*widget.Button        // 系统代理模式按钮组（清除、系统、终端）
+	proxyModeButtons [2]*widget.Button        // 系统代理模式按钮组（清除、系统）
 	systemProxy      *systemproxy.SystemProxy // 系统代理管理器
 	trafficChart     *TrafficChart            // 实时流量图组件
 
@@ -485,17 +487,14 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 		mw.updateMainToggleButton()
 	}
 
-	// 创建系统代理模式按钮组（三个按钮平分宽度）
+	// 创建系统代理模式按钮组（两个按钮平分宽度）
 	if mw.proxyModeButtons[0] == nil {
-		// 创建三个按钮，使用不同的图标增强视觉识别
+		// 创建两个按钮，使用不同的图标增强视觉识别
 		mw.proxyModeButtons[0] = widget.NewButtonWithIcon(SystemProxyModeClear.ShortString(), theme.DeleteIcon(), func() {
 			mw.onProxyModeButtonClicked(SystemProxyModeClear)
 		})
 		mw.proxyModeButtons[1] = widget.NewButtonWithIcon(SystemProxyModeAuto.ShortString(), theme.ComputerIcon(), func() {
 			mw.onProxyModeButtonClicked(SystemProxyModeAuto)
-		})
-		mw.proxyModeButtons[2] = widget.NewButtonWithIcon(SystemProxyModeTerminal.ShortString(), theme.SettingsIcon(), func() {
-			mw.onProxyModeButtonClicked(SystemProxyModeTerminal)
 		})
 
 		// 设置按钮初始重要性（所有按钮初始为 LowImportance，选中状态由 updateProxyModeButtonsState 管理）
@@ -508,6 +507,10 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 			savedModeStr := mw.appState.ConfigService.GetSystemProxyMode()
 			if savedModeStr != "" {
 				savedMode := ParseSystemProxyMode(savedModeStr)
+				// 如果保存的是终端模式，转换为清除模式（因为终端模式已移除）
+				if savedMode == SystemProxyModeTerminal {
+					savedMode = SystemProxyModeClear
+				}
 				mw.updateProxyModeButtonsState(savedMode)
 			}
 		}
@@ -574,7 +577,6 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	buttonGroup := container.NewWithoutLayout(
 		mw.proxyModeButtons[0],
 		mw.proxyModeButtons[1],
-		mw.proxyModeButtons[2],
 	)
 	buttonGroup.Layout = &proxyModeButtonLayout{}
 
@@ -604,8 +606,15 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 		trafficArea,
 	)
 
-	// 顶部标题栏：右侧仅保留设置入口
+	// 顶部标题栏：左侧logo，右侧设置入口
+	logoResource := createHomeLogo(mw.appState)
+	mw.homeLogoIcon = widget.NewIcon(logoResource)
+	if mw.homeLogoIcon != nil {
+		mw.homeLogoIcon.Resize(fyne.NewSize(32, 32))
+	}
+
 	headerButtons := container.NewHBox(
+		mw.homeLogoIcon,
 		layout.NewSpacer(),
 		NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
 			mw.ShowSettingsPage()
@@ -997,37 +1006,52 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 	switch mode {
 	case SystemProxyModeClear:
 		err = mw.systemProxy.ClearSystemProxy()
-		terminalErr := mw.systemProxy.ClearTerminalProxy()
-		if err == nil && terminalErr == nil {
-			logMessage = "已清除系统代理设置和环境变量代理"
-		} else if err != nil && terminalErr != nil {
-			logMessage = fmt.Sprintf("清除系统代理失败: %v; 清除环境变量代理失败: %v", err, terminalErr)
-			err = fmt.Errorf("清除失败: %v; %v", err, terminalErr)
-		} else if err != nil {
-			logMessage = fmt.Sprintf("清除系统代理失败: %v; 已清除环境变量代理", err)
+		// 根据设置页面的配置决定是否清除终端代理
+		shouldClearTerminal := false
+		if mw.appState != nil && mw.appState.ConfigService != nil {
+			shouldClearTerminal = mw.appState.ConfigService.GetTerminalProxyEnabled()
+		}
+		if shouldClearTerminal {
+			terminalErr := mw.systemProxy.ClearTerminalProxy()
+			if err == nil && terminalErr == nil {
+				logMessage = "已清除系统代理设置和环境变量代理"
+			} else if err != nil && terminalErr != nil {
+				logMessage = fmt.Sprintf("清除系统代理失败: %v; 清除环境变量代理失败: %v", err, terminalErr)
+				err = fmt.Errorf("清除失败: %v; %v", err, terminalErr)
+			} else if err != nil {
+				logMessage = fmt.Sprintf("清除系统代理失败: %v; 已清除环境变量代理", err)
+			} else {
+				logMessage = fmt.Sprintf("已清除系统代理设置; 清除环境变量代理失败: %v", terminalErr)
+				err = terminalErr
+			}
 		} else {
-			logMessage = fmt.Sprintf("已清除系统代理设置; 清除环境变量代理失败: %v", terminalErr)
-			err = terminalErr
+			if err == nil {
+				logMessage = "已清除系统代理设置"
+			} else {
+				logMessage = fmt.Sprintf("清除系统代理失败: %v", err)
+			}
 		}
 
 	case SystemProxyModeAuto:
 		_ = mw.systemProxy.ClearSystemProxy()
-		_ = mw.systemProxy.ClearTerminalProxy()
+		// 根据设置页面的配置决定是否设置终端代理
+		shouldSetTerminal := false
+		if mw.appState != nil && mw.appState.ConfigService != nil {
+			shouldSetTerminal = mw.appState.ConfigService.GetTerminalProxyEnabled()
+		}
 		err = mw.systemProxy.SetSystemProxy()
 		if err == nil {
 			logMessage = fmt.Sprintf("已自动配置系统代理: 127.0.0.1:%d", proxyPort)
+			if shouldSetTerminal {
+				terminalErr := mw.systemProxy.SetTerminalProxy()
+				if terminalErr == nil {
+					logMessage += "；已设置环境变量代理"
+				} else {
+					logMessage += fmt.Sprintf("；设置环境变量代理失败: %v", terminalErr)
+				}
+			}
 		} else {
 			logMessage = fmt.Sprintf("自动配置系统代理失败: %v", err)
-		}
-
-	case SystemProxyModeTerminal:
-		_ = mw.systemProxy.ClearSystemProxy()
-		_ = mw.systemProxy.ClearTerminalProxy()
-		err = mw.systemProxy.SetTerminalProxy()
-		if err == nil {
-			logMessage = fmt.Sprintf("已设置环境变量代理: socks5://127.0.0.1:%d (已写入shell配置文件)", proxyPort)
-		} else {
-			logMessage = fmt.Sprintf("设置环境变量代理失败: %v", err)
 		}
 
 	default:
@@ -1120,8 +1144,6 @@ func (mw *MainWindow) updateProxyModeButtonsState(mode SystemProxyMode) {
 		mw.proxyModeButtons[0].Importance = widget.MediumImportance
 	case SystemProxyModeAuto:
 		mw.proxyModeButtons[1].Importance = widget.MediumImportance
-	case SystemProxyModeTerminal:
-		mw.proxyModeButtons[2].Importance = widget.MediumImportance
 	}
 
 	// 刷新按钮显示
