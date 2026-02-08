@@ -75,12 +75,26 @@ func (tm *TrayManager) createTrayMenu(desk desktop.App) {
 	// 更新菜单项的选中状态
 	tm.updateProxyModeMenuCheckedState()
 
+	// 创建关闭代理菜单项
+	closeProxyMenuItem := fyne.NewMenuItem("关闭代理", func() {
+		if tm.appState != nil && tm.appState.MainWindow != nil {
+			// 停止Xray实例
+			tm.appState.MainWindow.StopProxy()
+			// 清除系统代理
+			if tm.appState.MainWindow != nil {
+				_ = tm.appState.MainWindow.SetSystemProxyMode(SystemProxyModeClear)
+			}
+		}
+	})
+
 	// 创建托盘菜单
 	menu := fyne.NewMenu("SOCKS5 代理客户端",
 		fyne.NewMenuItem("显示窗口", func() {
 			tm.window.Show()
 			tm.window.RequestFocus()
 		}),
+		fyne.NewMenuItemSeparator(),
+		closeProxyMenuItem, // 关闭代理（停止Xray）
 		fyne.NewMenuItemSeparator(),
 		tm.proxyModeMenuItems[0], // 清除代理
 		tm.proxyModeMenuItems[1], // 系统代理

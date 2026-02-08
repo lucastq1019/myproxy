@@ -14,20 +14,20 @@ type MonochromeTheme struct {
 	variant fyne.ThemeVariant
 }
 
-// 品牌色定义
+// 品牌色定义 - 符合苹果设计理念的配色
 const (
-	// BrandPrimary 主品牌色
-	BrandPrimary = "#3B82F6"
-	// BrandSecondary 次要品牌色
-	BrandSecondary = "#10B981"
-	// BrandAccent 强调色
-	BrandAccent = "#8B5CF6"
-	// BrandError 错误色
-	BrandError = "#EF4444"
-	// BrandWarning 警告色
-	BrandWarning = "#F59E0B"
-	// BrandInfo 信息色
-	BrandInfo = "#3B82F6"
+	// BrandPrimary 主品牌色 - 符合苹果设计的蓝色
+	BrandPrimary = "#007AFF"
+	// BrandSecondary 次要品牌色 - 柔和的灰色
+	BrandSecondary = "#8E8E93"
+	// BrandAccent 强调色 - 苹果系统绿色
+	BrandAccent = "#34C759"
+	// BrandError 错误色 - 苹果系统红色
+	BrandError = "#FF3B30"
+	// BrandWarning 警告色 - 苹果系统橙色
+	BrandWarning = "#FF9500"
+	// BrandInfo 信息色 - 柔和的蓝色
+	BrandInfo = "#5AC8FA"
 )
 
 // NewMonochromeTheme 创建黑白主题实例。
@@ -81,13 +81,13 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 	case theme.VariantDark:
 		switch name {
 		case theme.ColorNameBackground:
-			return color.NRGBA{R: 23, G: 23, B: 23, A: 255} // 深灰背景，增强层次
+			return color.NRGBA{R: 28, G: 28, B: 30, A: 255} // 苹果深色模式背景
 		case theme.ColorNameInputBackground:
-			return color.NRGBA{R: 30, G: 30, B: 30, A: 255} // 稍亮的输入背景，形成层次
+			return color.NRGBA{R: 44, G: 44, B: 46, A: 255} // 苹果深色模式输入框背景
 		case theme.ColorNameForeground:
-			return color.NRGBA{R: 240, G: 240, B: 240, A: 255} // 更亮的文字，增强对比度
+			return color.NRGBA{R: 255, G: 255, B: 255, A: 255} // 苹果深色模式文字
 		case theme.ColorNameButton:
-			return color.NRGBA{R: 45, G: 45, B: 45, A: 255} // 按钮背景，与输入框区分
+			return color.NRGBA{R: 44, G: 44, B: 46, A: 255} // 苹果深色模式按钮背景
 		case theme.ColorNamePrimary:
 			return hexToRGBA(BrandPrimary) // 使用品牌色作为主要元素颜色
 		case theme.ColorNameFocus:
@@ -95,34 +95,34 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 		case theme.ColorNameHover:
 			return hexToRGBA(BrandPrimary + "50") // 品牌色更透明作为悬停效果
 		case theme.ColorNameDisabled:
-			return color.NRGBA{R: 100, G: 100, B: 100, A: 255} // 禁用状态，降低对比
+			return color.NRGBA{R: 174, G: 174, B: 178, A: 255} // 苹果深色模式禁用状态
 		case theme.ColorNamePlaceHolder:
-			return color.NRGBA{R: 140, G: 140, B: 140, A: 255} // 占位符文字
+			return color.NRGBA{R: 174, G: 174, B: 178, A: 255} // 苹果深色模式占位符文字
 		case theme.ColorNameSelection:
 			return hexToRGBA(BrandPrimary + "64") // 品牌色半透明作为选中状态
 		case theme.ColorNameSeparator:
-			return color.NRGBA{R: 60, G: 60, B: 60, A: 255} // 分隔线
+			return color.NRGBA{R: 56, G: 56, B: 58, A: 255} // 苹果深色模式分隔线
 		case theme.ColorNameSuccess:
-			return hexToRGBA(BrandSecondary) // 成功色
+			return hexToRGBA(BrandAccent) // 成功色
 		case theme.ColorNameWarning:
 			return hexToRGBA(BrandWarning) // 警告色
 		case theme.ColorNameError:
 			return hexToRGBA(BrandError) // 错误色
 		case theme.ColorNameHeaderBackground:
-			return color.NRGBA{R: 30, G: 30, B: 30, A: 255} // 标题背景
+			return color.NRGBA{R: 32, G: 32, B: 34, A: 255} // 苹果深色模式标题背景
 		case theme.ColorNameHyperlink:
 			return hexToRGBA(BrandPrimary) // 超链接
 		}
 	case theme.VariantLight:
 		switch name {
 		case theme.ColorNameBackground:
-			return color.NRGBA{R: 255, G: 255, B: 255, A: 255} // 白色背景
+			return color.NRGBA{R: 255, G: 255, B: 255, A: 255} // 苹果浅色模式背景
 		case theme.ColorNameInputBackground:
-			return color.NRGBA{R: 252, G: 252, B: 252, A: 255} // 极浅灰输入背景，形成层次
+			return color.NRGBA{R: 242, G: 242, B: 247, A: 255} // 苹果浅色模式输入框背景
 		case theme.ColorNameForeground:
-			return color.NRGBA{R: 20, G: 20, B: 20, A: 255} // 深色文字，增强对比
+			return color.NRGBA{R: 0, G: 0, B: 0, A: 255} // 苹果浅色模式文字
 		case theme.ColorNameButton:
-			return color.NRGBA{R: 245, G: 245, B: 245, A: 255} // 浅灰按钮背景，更柔和
+			return color.NRGBA{R: 242, G: 242, B: 247, A: 255} // 苹果浅色模式按钮背景
 		case theme.ColorNamePrimary:
 			return hexToRGBA(BrandPrimary) // 使用品牌色作为主要元素颜色
 		case theme.ColorNameFocus:
@@ -130,21 +130,21 @@ func (t *MonochromeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 		case theme.ColorNameHover:
 			return hexToRGBA(BrandPrimary + "50") // 品牌色更透明作为悬停效果
 		case theme.ColorNameDisabled:
-			return color.NRGBA{R: 180, G: 180, B: 180, A: 255} // 禁用状态
+			return color.NRGBA{R: 199, G: 199, B: 204, A: 255} // 苹果浅色模式禁用状态
 		case theme.ColorNamePlaceHolder:
-			return color.NRGBA{R: 150, G: 150, B: 150, A: 255} // 占位符文字
+			return color.NRGBA{R: 199, G: 199, B: 204, A: 255} // 苹果浅色模式占位符文字
 		case theme.ColorNameSelection:
 			return hexToRGBA(BrandPrimary + "64") // 品牌色半透明作为选中状态
 		case theme.ColorNameSeparator:
-			return color.NRGBA{R: 220, G: 220, B: 220, A: 255} // 分隔线
+			return color.NRGBA{R: 229, G: 229, B: 234, A: 255} // 苹果浅色模式分隔线
 		case theme.ColorNameSuccess:
-			return hexToRGBA(BrandSecondary) // 成功色
+			return hexToRGBA(BrandAccent) // 成功色
 		case theme.ColorNameWarning:
 			return hexToRGBA(BrandWarning) // 警告色
 		case theme.ColorNameError:
 			return hexToRGBA(BrandError) // 错误色
 		case theme.ColorNameHeaderBackground:
-			return color.NRGBA{R: 248, G: 248, B: 248, A: 255} // 标题背景
+			return color.NRGBA{R: 242, G: 242, B: 247, A: 255} // 苹果浅色模式标题背景
 		case theme.ColorNameHyperlink:
 			return hexToRGBA(BrandPrimary) // 超链接
 		}
