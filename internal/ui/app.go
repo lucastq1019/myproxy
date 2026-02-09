@@ -45,9 +45,6 @@ func NewAppState() *AppState {
 	subscriptionService := service.NewSubscriptionService(dataStore, subscriptionManager)
 	pingUtil := utils.NewPing()
 
-	logCallback := func(level, message string) {
-	}
-
 	appState := &AppState{
 		Ping:                pingUtil,
 		Logger:              nil,
@@ -60,7 +57,7 @@ func NewAppState() *AppState {
 		PortBinding:         dataStore.ProxyStatus.PortBinding,
 		ServerNameBinding:   dataStore.ProxyStatus.ServerNameBinding,
 		ProxyService:        service.NewProxyService(nil),
-		XrayControlService:  service.NewXrayControlService(dataStore, configService, logCallback),
+		XrayControlService:  service.NewXrayControlService(dataStore, configService, nil),
 	}
 
 	appState.LogCallback = func(level, logType, message string) {
@@ -89,9 +86,9 @@ func (a *AppState) InitApp() error {
 	appIcon := createAppIcon(a)
 	if appIcon != nil {
 		a.App.SetIcon(appIcon)
-		fmt.Println("应用图标已设置（包括 Dock 图标）")
+		a.SafeLogger.Info("应用图标已设置（包括 Dock 图标）")
 	} else {
-		fmt.Println("警告: 应用图标创建失败")
+		a.SafeLogger.Warn("应用图标创建失败")
 	}
 
 	// 应用主题（从配置加载）
@@ -100,8 +97,7 @@ func (a *AppState) InitApp() error {
 	a.Window = a.App.NewWindow("myproxy")
 
 	defaultSize := fyne.NewSize(420, 520)
-	windowSize := LoadWindowSize(a, defaultSize)
-	a.Window.Resize(windowSize)
+	a.Window.Resize(a.LoadWindowSize(defaultSize))
 
 	if a.Store != nil {
 		a.Store.LoadAll()
@@ -154,10 +150,7 @@ func (a *AppState) InitLogger() error {
 
 func (a *AppState) AppendLog(level, logType, message string) {
 	level = strings.ToUpper(level)
-	switch strings.ToLower(logType) {
-	case "xray":
-		logType = "xray"
-	default:
+	if strings.ToLower(logType) != "xray" {
 		logType = "app"
 	}
 	if a.LogCallback != nil {
@@ -168,24 +161,24 @@ func (a *AppState) AppendLog(level, logType, message string) {
 	}
 }
 
-func LoadWindowSize(appState *AppState, defaultSize fyne.Size) fyne.Size {
-	if appState != nil && appState.Store != nil && appState.Store.AppConfig != nil {
-		return appState.Store.AppConfig.GetWindowSize(defaultSize)
+// LoadWindowSize 从配置加载窗口大小，未配置时返回默认尺寸。
+func (a *AppState) LoadWindowSize(defaultSize fyne.Size) fyne.Size {
+	if a.ConfigService != nil {
+		return a.ConfigService.GetWindowSize(defaultSize)
 	}
 	return defaultSize
 }
 
-func SaveWindowSize(appState *AppState, size fyne.Size) {
-	if appState != nil && appState.Store != nil && appState.Store.AppConfig != nil {
-		_ = appState.Store.AppConfig.SaveWindowSize(size)
+// SaveWindowSize 将窗口大小保存到配置。
+func (a *AppState) SaveWindowSize(size fyne.Size) {
+	if a.ConfigService != nil {
+		_ = a.ConfigService.SaveWindowSize(size)
 	}
 }
 
 func (a *AppState) SetupTray() {
-	trayManager := NewTrayManager(a)
-	fmt.Println("开始设置系统托盘...")
-	trayManager.SetupTray()
-	fmt.Println("系统托盘设置完成")
+	NewTrayManager(a).SetupTray()
+	a.SafeLogger.Info("系统托盘设置完成")
 }
 
 func (a *AppState) SetupWindowCloseHandler() {
@@ -195,11 +188,10 @@ func (a *AppState) SetupWindowCloseHandler() {
 
 	a.Window.SetCloseIntercept(func() {
 		if a.Window != nil && a.Window.Canvas() != nil {
-			SaveWindowSize(a, a.Window.Canvas().Size())
+			a.SaveWindowSize(a.Window.Canvas().Size())
 		}
 		a.Window.Hide()
 	})
-	fmt.Println("设置窗口关闭事件")
 }
 
 func (a *AppState) Startup() error {

@@ -11,6 +11,7 @@ import (
 	_ "github.com/xtls/xray-core/main/distro/all"
 
 	"github.com/xtls/xray-core/core"
+	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/infra/conf"
 	"myproxy.com/p/internal/model"
 )
@@ -238,90 +239,25 @@ func (xi *XrayInstance) GetInstance() *core.Instance {
 	return xi.instance
 }
 
-// TrafficStats 流量统计数据
-// Upload: 上传字节数
-// Download: 下载字节数
-func (xi *XrayInstance) TrafficStats() (int64, int64) {
-	if !xi.IsRunning() {
+// TrafficStats 返回当前出站代理的流量统计（上传、下载字节数）。
+// 需在配置中启用 "stats": {"enabled": true}，且出站 tag 为 "proxy"。
+func (xi *XrayInstance) TrafficStats() (upload, download int64) {
+	if !xi.IsRunning() || xi.instance == nil {
 		return 0, 0
 	}
-
-	// 获取总流量（从xray-core获取）
-	// 注意：不同版本的xray-core可能有不同的API
-	// 这里使用通用的方法尝试获取总流量
-	ctx := context.Background()
-
-	// 尝试获取stats管理器
-	statsManager := xi.instance.GetFeature("stats")
-	fmt.Println("statsManager === ", statsManager)
-	if statsManager == nil {
+	mgr, ok := xi.instance.GetFeature(stats.ManagerType()).(stats.Manager)
+	if !ok || mgr == nil {
 		return 0, 0
 	}
-
-	// 尝试从stats管理器获取流量统计
-	upload := int64(0)
-	download := int64(0)
-
-	// 尝试获取上传流量 - 尝试不同的路径
-	if statsGetter, ok := statsManager.(interface {
-		GetCounter(context.Context, string) (interface{}, error)
-	}); ok {
-		// 尝试路径1: outbound>>>proxy>>>traffic>>>uplink
-		if uploadCounter, err := statsGetter.GetCounter(ctx, "outbound>>>proxy>>>traffic>>>uplink"); err == nil && uploadCounter != nil {
-			if counter, ok := uploadCounter.(interface{ Value() int64 }); ok {
-				upload = counter.Value()
-			}
-		}
-
-		// 尝试获取下载流量 - 尝试不同的路径
-		if downloadCounter, err := statsGetter.GetCounter(ctx, "outbound>>>proxy>>>traffic>>>downlink"); err == nil && downloadCounter != nil {
-			if counter, ok := downloadCounter.(interface{ Value() int64 }); ok {
-				download = counter.Value()
-			}
-		}
+	// 出站 tag 与 CreateOutboundFromServer 中一致，路径格式见 xray 文档
+	const uplinkName = "outbound>>>proxy>>>traffic>>>uplink"
+	const downlinkName = "outbound>>>proxy>>>traffic>>>downlink"
+	if c := mgr.GetCounter(uplinkName); c != nil {
+		upload = c.Value()
 	}
-
-	// 如果获取失败，尝试其他可能的方法
-	if upload == 0 && download == 0 {
-		// 尝试从其他路径获取
-		if statsGetter, ok := statsManager.(interface {
-			GetCounter(string) (interface{}, error)
-		}); ok {
-			// 尝试路径1: outbound>>>proxy>>>traffic>>>uplink
-			if uploadCounter, err := statsGetter.GetCounter("outbound>>>proxy>>>traffic>>>uplink"); err == nil && uploadCounter != nil {
-				if counter, ok := uploadCounter.(interface{ Value() int64 }); ok {
-					upload = counter.Value()
-				}
-			}
-
-			if downloadCounter, err := statsGetter.GetCounter("outbound>>>proxy>>>traffic>>>downlink"); err == nil && downloadCounter != nil {
-				if counter, ok := downloadCounter.(interface{ Value() int64 }); ok {
-					download = counter.Value()
-				}
-			}
-		}
+	if c := mgr.GetCounter(downlinkName); c != nil {
+		download = c.Value()
 	}
-
-	// 如果还是获取失败，尝试其他可能的路径
-	if upload == 0 && download == 0 {
-		// 尝试路径2: outbound>>>traffic>>>uplink
-		if statsGetter, ok := statsManager.(interface {
-			GetCounter(context.Context, string) (interface{}, error)
-		}); ok {
-			if uploadCounter, err := statsGetter.GetCounter(ctx, "outbound>>>traffic>>>uplink"); err == nil && uploadCounter != nil {
-				if counter, ok := uploadCounter.(interface{ Value() int64 }); ok {
-					upload = counter.Value()
-				}
-			}
-
-			if downloadCounter, err := statsGetter.GetCounter(ctx, "outbound>>>traffic>>>downlink"); err == nil && downloadCounter != nil {
-				if counter, ok := downloadCounter.(interface{ Value() int64 }); ok {
-					download = counter.Value()
-				}
-			}
-		}
-	}
-
 	return upload, download
 }
 
@@ -614,19 +550,21 @@ func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, rou
 	// 构建路由规则（含用户直连列表与是否走代理）
 	rules := buildRoutingRules(routing)
 
+	// policy.system 中开启 outbound 统计后，outbound handler 才会注册 traffic counter（见 app/proxyman/outbound/handler.go getStatCounter）
+	policyConfig := map[string]interface{}{
+		"system": map[string]interface{}{
+			"statsOutboundUplink":   true,
+			"statsOutboundDownlink": true,
+		},
+	}
+
 	// 构建完整配置
 	config := map[string]interface{}{
-		"log": logConfig,
-		"stats": map[string]interface{}{
-			"enabled": true,
-		},
-		"inbounds": []interface{}{
-			inbound,
-		},
-		"outbounds": []interface{}{
-			outbound,
-			directOutbound,
-		},
+		"log":       logConfig,
+		"stats":    map[string]interface{}{},
+		"policy":   policyConfig,
+		"inbounds":  []interface{}{inbound},
+		"outbounds": []interface{}{outbound, directOutbound},
 		"routing": map[string]interface{}{
 			"rules":          rules,
 			"domainStrategy": "AsIs",

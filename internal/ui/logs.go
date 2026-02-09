@@ -118,13 +118,13 @@ func (lp *LogsPanel) Build() fyne.CanvasObject {
 	// 顶部控制栏：仅保留级别/类型筛选（无刷新按钮），在窄宽度下自然纵向排列。
 	levelRow := container.NewHBox(
 		levelLabel,
-		NewSpacer(SpacingSmall),
+		layout.NewSpacer(),
 		container.NewGridWrap(fyne.NewSize(100, 40), lp.levelSel),
 		layout.NewSpacer(),
 	)
 	typeRow := container.NewHBox(
 		typeLabel,
-		NewSpacer(SpacingSmall),
+		layout.NewSpacer(),
 		container.NewGridWrap(fyne.NewSize(100, 40), lp.typeSel),
 		layout.NewSpacer(),
 	)

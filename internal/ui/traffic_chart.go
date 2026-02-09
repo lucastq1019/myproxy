@@ -86,27 +86,9 @@ func (tc *TrafficChart) updateData() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	// 获取总流量（从 xray 实例获取真实数据）
 	var totalUpload, totalDownload int64
-
-	// 检查各个条件的状态
-	appStateOK := tc.appState != nil
-	xrayControlServiceOK := appStateOK && tc.appState.XrayControlService != nil
-	xrayInstanceOK := xrayControlServiceOK && tc.appState.XrayInstance != nil
-	isRunningOK := xrayInstanceOK && tc.appState.XrayInstance.IsRunning()
-
-	// 打印条件状态日志
-	fmt.Printf("条件检查: appState=%v, XrayControlService=%v, XrayInstance=%v, IsRunning=%v\n",
-		appStateOK, xrayControlServiceOK, xrayInstanceOK, isRunningOK)
-
-	if appStateOK && xrayControlServiceOK && xrayInstanceOK && isRunningOK {
-		// 从 XrayControlService 获取真实流量统计
+	if tc.appState != nil && tc.appState.XrayControlService != nil && tc.appState.XrayInstance != nil && tc.appState.XrayInstance.IsRunning() {
 		totalUpload, totalDownload = tc.appState.XrayControlService.GetTrafficStats(tc.appState.XrayInstance)
-		fmt.Printf("获取到流量数据: 总上传=%d, 总下载=%d\n", totalUpload, totalDownload)
-	} else {
-		totalUpload = 0
-		totalDownload = 0
-		fmt.Println("未获取流量数据: 条件不满足")
 	}
 
 	// 计算实时流量（与上一次的差值）
@@ -147,16 +129,8 @@ func (tc *TrafficChart) updateData() {
 		tc.dataPoints = tc.dataPoints[len(tc.dataPoints)-tc.maxPoints:]
 	}
 
-	// 更新当前流量
 	tc.currentUpload = upload
 	tc.currentDownload = download
-
-	// 输出流量数据到日志 - 确保安全输出
-	logMessage := fmt.Sprintf("流量数据更新: 上传 %s, 下载 %s, 总上传 %d, 总下载 %d",
-		formatSpeed(upload), formatSpeed(download), totalUpload, totalDownload)
-
-	// 安全输出日志，不依赖appState状态
-	fmt.Println(logMessage)
 }
 
 // simulateTraffic 模拟流量数据（用于测试）

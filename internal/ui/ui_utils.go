@@ -3,20 +3,8 @@ package ui
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
-
-const (
-	SpacingSmall  = 4.0
-	SpacingMedium = 8.0
-	SpacingLarge  = 12.0
-)
-
-func NewSpacer(width float32) fyne.CanvasObject {
-	_ = width
-	return layout.NewSpacer()
-}
 
 func NewButtonWithIcon(text string, icon fyne.Resource, onTapped func()) *widget.Button {
 	btn := widget.NewButton(text, onTapped)

@@ -543,7 +543,7 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	// 使用自定义布局确保：图标区域占10%，节点名称区域占90%
 	iconWithSpacer := container.NewHBox(
 		widget.NewIcon(theme.ComputerIcon()),
-		NewSpacer(SpacingSmall),
+		layout.NewSpacer(),
 	)
 
 	// 节点名称区域：占90%宽度，确保占满
@@ -570,7 +570,7 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	modeIcon := widget.NewIcon(theme.SettingsIcon())
 	iconArea := container.NewHBox(
 		modeIcon,
-		NewSpacer(SpacingSmall),
+		layout.NewSpacer(),
 	)
 
 	// 按钮组区域：占90%宽度
@@ -602,7 +602,7 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	content := container.NewVBox(
 		mainControlArea,
 		nodeAndMode,
-		NewSpacer(SpacingSmall), // 减少间距（从 Large 改为 Medium）
+		layout.NewSpacer(),
 		trafficArea,
 	)
 
@@ -648,12 +648,11 @@ func (mw *MainWindow) showPage(pageType PageType, pageContent fyne.CanvasObject,
 	// 设置内容
 	mw.appState.Window.SetContent(pageContent)
 
-	// 从 Store 读取窗口大小并应用（在SetContent之后，避免内容的最小尺寸要求导致窗口变大）
+	// 从配置读取窗口大小并应用（在 SetContent 之后，避免内容最小尺寸导致窗口变大）
 	defaultSize := fyne.NewSize(420, 520)
-	windowSize := LoadWindowSize(mw.appState, defaultSize)
+	windowSize := mw.appState.LoadWindowSize(defaultSize)
 	mw.appState.Window.Resize(windowSize)
-	// 保存当前窗口大小到 Store（确保保存的是设置后的尺寸）
-	SaveWindowSize(mw.appState, windowSize)
+	mw.appState.SaveWindowSize(windowSize)
 }
 
 // Back 返回到上一个页面（从路由栈中弹出）

@@ -130,7 +130,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	titleLabel := NewTitleLabel("设置")
 	headerBar := container.NewPadded(container.NewHBox(
 		backBtn,
-		NewSpacer(SpacingLarge),
+		layout.NewSpacer(),
 		titleLabel,
 		layout.NewSpacer(),
 	))
