@@ -329,9 +329,9 @@ func (np *NodePage) onNodeSelected(id widget.ListItemID) {
 
 	node := nodes[id]
 
-	// 通过 Store 选中节点（会自动更新数据库和绑定）
-	if np.appState != nil && np.appState.Store != nil && np.appState.Store.Nodes != nil {
-		if err := np.appState.Store.Nodes.Select(node.ID); err != nil {
+	// 通过 Store 选中节点并同步到 AppConfig（应用层与列表页一致）
+	if np.appState != nil && np.appState.Store != nil {
+		if err := np.appState.Store.SelectServer(node.ID); err != nil {
 			if np.appState.Logger != nil {
 				np.appState.Logger.Error("选中服务器失败: %v", err)
 			}

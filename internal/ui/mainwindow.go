@@ -1109,12 +1109,7 @@ func (mw *MainWindow) SetSystemProxyMode(mode SystemProxyMode) error {
 
 	// 应用系统代理模式（保存到 Store）
 	err := mw.applySystemProxyModeCore(mode, true)
-
-	// 刷新托盘菜单（如果存在）
-	// 注意：TrayManager 不是 AppState 的字段，而是在 SetupTray 中创建的临时对象
-	// 这里我们不直接引用 TrayManager，因为它的生命周期由 SetupTray 管理
-	// 托盘菜单的刷新会在模式变化时自动处理
-
+	mw.appState.refreshTrayProxyMenu()
 	return err
 }
 

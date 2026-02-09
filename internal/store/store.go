@@ -37,10 +37,14 @@ func NewStore(subscriptionManager *subscription.SubscriptionManager) *Store {
 }
 
 func (s *Store) LoadAll() {
-	s.Nodes.Load()
+	_ = s.Nodes.Load()
 	s.Subscriptions.Load()
 	s.Layout.Load()
 	s.AppConfig.Load()
+	// 将当前选中的服务器 ID 同步到 AppConfig，供自动启动等逻辑使用
+	if id := s.Nodes.GetSelectedID(); id != "" {
+		_ = s.AppConfig.Set("selectedServerID", id)
+	}
 	s.initialized = true
 }
 
@@ -71,16 +75,24 @@ func (ns *NodesStore) Load() error {
 	if err != nil {
 		ns.mu.Lock()
 		ns.nodes = []*model.Node{}
+		ns.selectedServerID = ""
 		ns.mu.Unlock()
 		ns.updateBinding()
 		return fmt.Errorf("节点存储: 加载节点列表失败: %w", err)
 	}
 
-	// 转换为指针切片
 	ns.mu.Lock()
 	ns.nodes = make([]*model.Node, len(nodes))
 	for i := range nodes {
 		ns.nodes[i] = &nodes[i]
+	}
+	// 从数据库恢复“选中”状态，使应用层与列表页一致
+	ns.selectedServerID = ""
+	for _, node := range ns.nodes {
+		if node.Selected {
+			ns.selectedServerID = node.ID
+			break
+		}
 	}
 	ns.mu.Unlock()
 
@@ -141,6 +153,14 @@ func (ns *NodesStore) Select(id string) error {
 	ns.selectedServerID = id
 	ns.mu.Unlock()
 	return ns.Load()
+}
+
+// SelectServer 选中指定服务器并同步到 AppConfig（应用层与列表页一致，供托盘/自动启动等使用）。
+func (s *Store) SelectServer(id string) error {
+	if err := s.Nodes.Select(id); err != nil {
+		return err
+	}
+	return s.AppConfig.Set("selectedServerID", id)
 }
 
 func (ns *NodesStore) UpdateDelay(id string, delay int) error {

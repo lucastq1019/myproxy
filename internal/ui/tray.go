@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"fmt"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
 )
@@ -24,33 +22,30 @@ func NewTrayManager(appState *AppState) *TrayManager {
 	}
 }
 
+// getSystemProxyModeFromAppState 从 AppState（ConfigService）读取系统代理模式，与主窗口共用同一数据源。
+func getSystemProxyModeFromAppState(a *AppState) SystemProxyMode {
+	if a == nil || a.ConfigService == nil {
+		return SystemProxyModeClear
+	}
+	s := a.ConfigService.GetSystemProxyMode()
+	if s == "" {
+		return SystemProxyModeClear
+	}
+	return ParseSystemProxyMode(s)
+}
+
 // SetupTray 设置系统托盘（使用 Fyne 原生系统托盘 API）
 func (tm *TrayManager) SetupTray() {
-	// 检查应用是否支持桌面扩展（系统托盘需要）
 	if desk, ok := tm.app.(desktop.App); ok {
-		fmt.Println("应用支持桌面扩展，开始设置托盘图标...")
-
-		// 创建托盘图标
 		icon := createTrayIconResource(tm.appState)
 		if icon == nil {
-			fmt.Println("警告: 创建托盘图标失败")
+			tm.appState.SafeLogger.Warn("创建托盘图标失败")
 			return
 		}
-		fmt.Println("托盘图标创建成功")
-
-		// 设置托盘图标
 		desk.SetSystemTrayIcon(icon)
-		fmt.Println("托盘图标已设置")
-
-		// 创建托盘菜单
 		tm.createTrayMenu(desk)
-		fmt.Println("托盘菜单已设置")
 	} else {
-		// 如果不支持桌面扩展，记录警告
-		fmt.Println("错误: 应用不支持桌面扩展，无法显示系统托盘")
-		if tm.appState.Logger != nil {
-			tm.appState.Logger.Error("应用不支持桌面扩展，无法显示系统托盘")
-		}
+		tm.appState.SafeLogger.Warn("应用不支持桌面扩展，无法显示系统托盘")
 	}
 }
 
@@ -113,14 +108,12 @@ func (tm *TrayManager) RefreshProxyModeMenu() {
 	tm.refreshProxyModeMenu()
 }
 
-// updateProxyModeMenuCheckedState 更新菜单项的选中状态（不刷新菜单）
+// updateProxyModeMenuCheckedState 从 AppState（ConfigService）读取系统代理模式，更新菜单选中状态。
 func (tm *TrayManager) updateProxyModeMenuCheckedState() {
-	if tm.appState == nil || tm.appState.MainWindow == nil {
+	if tm.appState == nil || tm.appState.ConfigService == nil {
 		return
 	}
-
-	// 获取当前系统代理模式
-	currentMode := tm.appState.MainWindow.GetCurrentSystemProxyMode()
+	currentMode := getSystemProxyModeFromAppState(tm.appState)
 
 	// 更新菜单项的选中状态
 	for i, item := range tm.proxyModeMenuItems {
@@ -136,14 +129,12 @@ func (tm *TrayManager) updateProxyModeMenuCheckedState() {
 	}
 }
 
-// refreshProxyModeMenu 刷新系统代理模式菜单的选中状态（内部方法）
+// refreshProxyModeMenu 根据 AppState 当前状态刷新托盘代理模式菜单。
 func (tm *TrayManager) refreshProxyModeMenu() {
-	if tm.appState == nil || tm.appState.MainWindow == nil {
+	if tm.appState == nil || tm.appState.ConfigService == nil {
 		return
 	}
-
-	// 获取当前系统代理模式
-	currentMode := tm.appState.MainWindow.GetCurrentSystemProxyMode()
+	currentMode := getSystemProxyModeFromAppState(tm.appState)
 
 	// 检查是否有状态变化
 	needRefresh := false

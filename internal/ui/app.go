@@ -24,6 +24,7 @@ type AppState struct {
 	App        fyne.App
 	Window     fyne.Window
 	MainWindow *MainWindow
+	TrayManager *TrayManager
 	Store      *store.Store
 	ServerService       *service.ServerService
 	ConfigService       *service.ConfigService
@@ -78,6 +79,14 @@ func (a *AppState) updateStatusBindings() {
 
 func (a *AppState) UpdateProxyStatus() {
 	a.updateStatusBindings()
+	a.refreshTrayProxyMenu()
+}
+
+// refreshTrayProxyMenu 刷新托盘代理/模式菜单，使托盘状态与 AppState（Store/ConfigService）一致。
+func (a *AppState) refreshTrayProxyMenu() {
+	if a.TrayManager != nil {
+		a.TrayManager.RefreshProxyModeMenu()
+	}
 }
 
 func (a *AppState) InitApp() error {
@@ -177,7 +186,8 @@ func (a *AppState) SaveWindowSize(size fyne.Size) {
 }
 
 func (a *AppState) SetupTray() {
-	NewTrayManager(a).SetupTray()
+	a.TrayManager = NewTrayManager(a)
+	a.TrayManager.SetupTray()
 	a.SafeLogger.Info("系统托盘设置完成")
 }
 
