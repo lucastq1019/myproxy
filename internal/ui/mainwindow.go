@@ -854,6 +854,12 @@ func (mw *MainWindow) startProxy() {
 	}
 }
 
+// StopProxy 停止代理（公共方法，供外部调用）
+// 调用内部的 stopProxy 方法来停止 Xray 实例
+func (mw *MainWindow) StopProxy() {
+	mw.stopProxy()
+}
+
 // stopProxy 停止代理
 // 使用 XrayControlService 来处理代理停止逻辑
 func (mw *MainWindow) stopProxy() {

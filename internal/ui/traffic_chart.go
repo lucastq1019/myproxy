@@ -34,6 +34,11 @@ type TrafficChart struct {
 	currentUpload   int64
 	currentDownload int64
 
+	// 上一次的流量统计（用于计算实时流量）
+	lastUpload   int64
+	lastDownload int64
+	lastTime     time.Time
+
 	// 锁保护
 	mu sync.RWMutex
 
@@ -48,6 +53,7 @@ func NewTrafficChart(appState *AppState) *TrafficChart {
 		appState:   appState,
 		dataPoints: make([]TrafficData, 0),
 		maxPoints:  60, // 保留最近60个数据点（约1分钟，假设每秒更新）
+		lastTime:   time.Now(),
 		stopChan:   make(chan struct{}),
 	}
 	tc.ExtendBaseWidget(tc)
@@ -80,21 +86,54 @@ func (tc *TrafficChart) updateData() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	// 获取当前流量（从 xray 实例或模拟数据）
-	var upload, download int64
+	// 获取总流量（从 xray 实例获取真实数据）
+	var totalUpload, totalDownload int64
 
-	if tc.appState != nil && tc.appState.XrayInstance != nil && tc.appState.XrayInstance.IsRunning() {
-		// TODO: 从 xray 实例获取真实流量统计
-		// 目前使用模拟数据
-		upload = tc.simulateTraffic()
-		download = tc.simulateTraffic()
+	// 检查各个条件的状态
+	appStateOK := tc.appState != nil
+	xrayControlServiceOK := appStateOK && tc.appState.XrayControlService != nil
+	xrayInstanceOK := xrayControlServiceOK && tc.appState.XrayInstance != nil
+	isRunningOK := xrayInstanceOK && tc.appState.XrayInstance.IsRunning()
+
+	// 打印条件状态日志
+	fmt.Printf("条件检查: appState=%v, XrayControlService=%v, XrayInstance=%v, IsRunning=%v\n",
+		appStateOK, xrayControlServiceOK, xrayInstanceOK, isRunningOK)
+
+	if appStateOK && xrayControlServiceOK && xrayInstanceOK && isRunningOK {
+		// 从 XrayControlService 获取真实流量统计
+		totalUpload, totalDownload = tc.appState.XrayControlService.GetTrafficStats(tc.appState.XrayInstance)
+		fmt.Printf("获取到流量数据: 总上传=%d, 总下载=%d\n", totalUpload, totalDownload)
 	} else {
+		totalUpload = 0
+		totalDownload = 0
+		fmt.Println("未获取流量数据: 条件不满足")
+	}
+
+	// 计算实时流量（与上一次的差值）
+	now := time.Now()
+	timeDiff := now.Sub(tc.lastTime).Seconds()
+	if timeDiff == 0 {
+		timeDiff = 1 // 避免除以零
+	}
+
+	// 计算实时流量（字节/秒）
+	upload := int64(float64(totalUpload-tc.lastUpload) / timeDiff)
+	download := int64(float64(totalDownload-tc.lastDownload) / timeDiff)
+
+	// 确保流量不为负数
+	if upload < 0 {
 		upload = 0
+	}
+	if download < 0 {
 		download = 0
 	}
 
+	// 更新上一次的流量数据和时间
+	tc.lastUpload = totalUpload
+	tc.lastDownload = totalDownload
+	tc.lastTime = now
+
 	// 添加新数据点
-	now := time.Now()
 	newPoint := TrafficData{
 		Upload:   upload,
 		Download: download,
@@ -111,6 +150,13 @@ func (tc *TrafficChart) updateData() {
 	// 更新当前流量
 	tc.currentUpload = upload
 	tc.currentDownload = download
+
+	// 输出流量数据到日志 - 确保安全输出
+	logMessage := fmt.Sprintf("流量数据更新: 上传 %s, 下载 %s, 总上传 %d, 总下载 %d",
+		formatSpeed(upload), formatSpeed(download), totalUpload, totalDownload)
+
+	// 安全输出日志，不依赖appState状态
+	fmt.Println(logMessage)
 }
 
 // simulateTraffic 模拟流量数据（用于测试）
@@ -130,14 +176,15 @@ func (tc *TrafficChart) Stop() {
 
 // CreateRenderer 创建渲染器
 func (tc *TrafficChart) CreateRenderer() fyne.WidgetRenderer {
-		bgColor := CurrentThemeColor(tc.appState.App, theme.ColorNameBackground)
-		return &trafficChartRenderer{
+	bgColor := CurrentThemeColor(tc.appState.App, theme.ColorNameBackground)
+	return &trafficChartRenderer{
 		trafficChart:  tc,
 		uploadLines:   make([]*canvas.Line, 0),
 		downloadLines: make([]*canvas.Line, 0),
 		uploadLabel:   widget.NewLabel("上传: 0 KB/s"),
 		downloadLabel: widget.NewLabel("下载: 0 KB/s"),
 		bgRect:        canvas.NewRectangle(bgColor),
+		objects:       make([]fyne.CanvasObject, 0),
 	}
 }
 
@@ -221,7 +268,7 @@ func (r *trafficChartRenderer) drawChart(width, height float32) {
 
 	uploadColor := CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNamePrimary)
 	downloadColor := CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameFocus)
-	
+
 	// 绘制上传线（连接所有点）
 	for i := 0; i < len(dataPoints)-1; i++ {
 		x1 := float32(i) * pointSpacing
@@ -277,21 +324,22 @@ func (r *trafficChartRenderer) Refresh() {
 
 // Objects 返回所有对象
 func (r *trafficChartRenderer) Objects() []fyne.CanvasObject {
-	objects := make([]fyne.CanvasObject, 0)
-	objects = append(objects, r.bgRect)
+	// 清空并重新构建对象列表
+	r.objects = r.objects[:0]
+	r.objects = append(r.objects, r.bgRect)
 
 	// 添加所有上传线
 	for _, line := range r.uploadLines {
-		objects = append(objects, line)
+		r.objects = append(r.objects, line)
 	}
 
 	// 添加所有下载线
 	for _, line := range r.downloadLines {
-		objects = append(objects, line)
+		r.objects = append(r.objects, line)
 	}
 
-	objects = append(objects, r.uploadLabel, r.downloadLabel)
-	return objects
+	r.objects = append(r.objects, r.uploadLabel, r.downloadLabel)
+	return r.objects
 }
 
 // Destroy 销毁

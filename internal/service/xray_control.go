@@ -230,3 +230,17 @@ func (xcs *XrayControlService) IsRunning(instance *xray.XrayInstance) bool {
 	}
 	return instance.IsRunning()
 }
+
+// GetTrafficStats 获取流量统计数据。
+// 参数：
+//   - instance: Xray 实例
+//
+// 返回：
+//   - upload: 上传字节数
+//   - download: 下载字节数
+func (xcs *XrayControlService) GetTrafficStats(instance *xray.XrayInstance) (int64, int64) {
+	if instance == nil {
+		return 0, 0
+	}
+	return instance.TrafficStats()
+}

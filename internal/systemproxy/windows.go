@@ -64,8 +64,9 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 	}
 	defer key.Close()
 
-	// 设置代理服务器地址，格式：host:port
-	proxyServer := fmt.Sprintf("%s:%d", host, port)
+	// 设置代理服务器地址，格式：socks=host:port
+	// 注意：在Windows中，需要指定代理类型为socks，否则默认使用HTTP代理
+	proxyServer := fmt.Sprintf("socks=%s:%d", host, port)
 	if err := key.SetStringValue("ProxyServer", proxyServer); err != nil {
 		return fmt.Errorf("设置代理服务器地址失败: %v", err)
 	}
