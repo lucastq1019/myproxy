@@ -312,7 +312,6 @@ func ParseSystemProxyModeFromShort(shortModeName string) SystemProxyMode {
 // 它负责协调订阅管理、服务器列表、日志显示和状态信息四个主要区域的显示。
 type MainWindow struct {
 	appState    *AppState
-	logsPanel   *LogsPanel
 	pageStack   *PageStack // 路由栈，用于管理页面导航历史
 	currentPage PageType   // 当前页面类型
 
@@ -356,18 +355,8 @@ func NewMainWindow(appState *AppState) *MainWindow {
 
 	// 布局配置由 Store 管理，无需在这里加载
 
-	// 创建各个面板
-	mw.logsPanel = NewLogsPanel(appState)
-
 	// 创建系统代理管理器（默认使用 localhost:10808）
 	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10808)
-
-	// 设置日志回调函数到 AppState，以便其他组件可以记录日志
-	appState.LogCallback = func(level, logType, message string) {
-		if mw.logsPanel != nil {
-			mw.logsPanel.AppendLog(level, logType, message)
-		}
-	}
 
 	// 注意：系统代理状态的恢复将在 buildHomePage() 中完成
 	// 因为需要先创建 proxyModeRadio 组件
@@ -396,9 +385,8 @@ func (mw *MainWindow) Build() fyne.CanvasObject {
 // 该方法会更新数据绑定，使 UI 自动反映最新的应用状态。
 // 注意：此方法包含安全检查，防止在窗口移动/缩放时出现空指针错误。
 func (mw *MainWindow) Refresh() {
-	// 安全检查：确保所有面板都已初始化
-	if mw.logsPanel != nil {
-		mw.logsPanel.Refresh() // 刷新日志面板，显示最新日志
+	if mw.appState != nil && mw.appState.LogsPanel != nil {
+		mw.appState.LogsPanel.Refresh()
 	}
 	// 使用双向绑定，只需更新绑定数据，UI 会自动更新
 	if mw.appState != nil {

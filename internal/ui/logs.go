@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +27,16 @@ type LogEntry struct {
 	Line      string // 完整的日志行
 }
 
+// 日志面板内存优化常量
+const (
+	maxBufferSize     = 1000  // 内存中最多保留的日志条数
+	maxDisplayLines   = 500   // RichText 最多渲染的条数（减少 UI 内存占用）
+	refreshDebounceMs = 300   // 快速追加日志时的刷新防抖间隔（毫秒）
+)
+
 // LogsPanel 管理应用日志和代理日志的显示。
 // 它支持按日志级别和类型过滤，并提供追加日志功能。
+// 内存优化：仅保留最近 N 条日志，限制显示条数，并对快速追加做防抖。
 type LogsPanel struct {
 	appState       *AppState
 	logContent     *widget.RichText // 使用 RichText 以支持自定义文本颜色
@@ -35,7 +44,6 @@ type LogsPanel struct {
 	typeSel        *widget.Select
 	logBuffer      []LogEntry         // 日志缓冲区
 	bufferMutex    sync.Mutex         // 保护日志缓冲区的互斥锁
-	maxBufferSize  int                // 最大缓冲区大小
 	fileWatcher    *fsnotify.Watcher  // 文件监控器
 	ctx            context.Context    // 上下文，用于控制监控 goroutine
 	cancel         context.CancelFunc // 取消函数
@@ -44,6 +52,10 @@ type LogsPanel struct {
 	collapseBtn    *widget.Button     // 折叠/展开按钮
 	logScroll      *container.Scroll  // 日志滚动容器
 	panelContainer fyne.CanvasObject  // 面板容器
+
+	// 防抖刷新
+	refreshTimer  *time.Timer
+	refreshTimerMu sync.Mutex
 }
 
 // NewLogsPanel 创建并初始化日志显示面板。
@@ -55,8 +67,7 @@ type LogsPanel struct {
 func NewLogsPanel(appState *AppState) *LogsPanel {
 	lp := &LogsPanel{
 		appState:      appState,
-		logBuffer:     make([]LogEntry, 0),
-		maxBufferSize: 1000, // 最多保存1000条日志
+		logBuffer:   make([]LogEntry, 0, maxBufferSize+1),
 		isCollapsed:   true, // 默认折叠，符合“默认隐藏，需要时深入”的设计
 	}
 
@@ -98,10 +109,7 @@ func NewLogsPanel(appState *AppState) *LogsPanel {
 	// 创建上下文用于控制监控 goroutine
 	lp.ctx, lp.cancel = context.WithCancel(context.Background())
 
-	// 初始加载历史日志
-	lp.loadInitialLogs()
-
-	// 注意：文件监控将在Logger初始化后启动（在cmd/gui/main.go中）
+	// 注意：文件监控将在 Logger 初始化后启动（在 app.go Startup 中）
 
 	return lp
 }
@@ -238,74 +246,25 @@ func (lp *LogsPanel) AppendLogLine(logLine string) {
 		return
 	}
 
+	// 尝试解析为 xray 访问日志并记录访问（用于流量分析）
+	if lp.appState != nil && lp.appState.AccessRecordService != nil {
+		lp.appState.AccessRecordService.RecordAccessFromLogLine(logLine)
+	}
+
 	// 解析日志行
 	entry := lp.parseLogLine(logLine)
 	if entry == nil {
 		return
 	}
 
-	// 线程安全地追加到缓冲区
 	lp.bufferMutex.Lock()
 	lp.logBuffer = append(lp.logBuffer, *entry)
-
-	// 如果超过最大大小，删除最旧的日志
-	if len(lp.logBuffer) > lp.maxBufferSize {
-		lp.logBuffer = lp.logBuffer[len(lp.logBuffer)-lp.maxBufferSize:]
+	if len(lp.logBuffer) > maxBufferSize {
+		lp.logBuffer = lp.logBuffer[len(lp.logBuffer)-maxBufferSize:]
 	}
 	lp.bufferMutex.Unlock()
 
-	// 更新显示
-	lp.refreshDisplay()
-}
-
-// loadInitialLogs 加载初始日志（从文件加载历史日志）
-func (lp *LogsPanel) loadInitialLogs() {
-	if lp.appState == nil || lp.appState.Logger == nil {
-		return
-	}
-
-	logFilePath := lp.appState.Logger.GetLogFilePath()
-	if logFilePath == "" {
-		return
-	}
-
-	// 尝试直接读取日志文件（如果存在）
-	file, err := os.Open(logFilePath)
-	if err != nil {
-		// 文件不存在，跳过
-		return
-	}
-	defer file.Close()
-
-	// 读取所有内容
-	scanner := bufio.NewScanner(file)
-	logLines := make([]string, 0)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			logLines = append(logLines, line)
-		}
-	}
-
-	// 解析日志行并添加到缓冲区
-	lp.bufferMutex.Lock()
-	lp.logBuffer = make([]LogEntry, 0, len(logLines))
-	for _, line := range logLines {
-		entry := lp.parseLogLine(line)
-		if entry != nil {
-			lp.logBuffer = append(lp.logBuffer, *entry)
-		}
-	}
-
-	// 更新 lastReadPos 为文件末尾（避免重复读取）
-	if fileInfo, err := os.Stat(logFilePath); err == nil {
-		lp.lastReadPos = fileInfo.Size()
-	}
-
-	lp.bufferMutex.Unlock()
-
-	// 刷新显示
-	lp.refreshDisplay()
+	lp.scheduleRefresh()
 }
 
 // parseLogLine 解析日志行，提取级别、类型和消息
@@ -398,50 +357,64 @@ func (lp *LogsPanel) parseLogLine(line string) *LogEntry {
 	}
 }
 
-// refreshDisplay 根据当前过滤条件刷新显示（仅过滤显示，不影响日志输出级别）
+// scheduleRefresh 防抖刷新：快速追加时合并为一次刷新，减少 UI 压力。
+func (lp *LogsPanel) scheduleRefresh() {
+	lp.refreshTimerMu.Lock()
+	defer lp.refreshTimerMu.Unlock()
+
+	if lp.refreshTimer == nil {
+		lp.refreshTimer = time.AfterFunc(time.Duration(refreshDebounceMs)*time.Millisecond, func() {
+			lp.refreshTimerMu.Lock()
+			lp.refreshTimer = nil
+			lp.refreshTimerMu.Unlock()
+			lp.refreshDisplay()
+		})
+	} else {
+		lp.refreshTimer.Reset(time.Duration(refreshDebounceMs) * time.Millisecond)
+	}
+}
+
+// refreshDisplay 根据当前过滤条件刷新显示（仅过滤显示，不影响日志输出级别）。
+// 内存优化：最多渲染 maxDisplayLines 条，避免 RichText 持有过多 segment。
 func (lp *LogsPanel) refreshDisplay() {
 	if lp.logContent == nil || lp.levelSel == nil || lp.typeSel == nil {
 		return
 	}
 
 	lp.bufferMutex.Lock()
-	defer lp.bufferMutex.Unlock()
-
 	levelFilter := lp.levelSel.Selected
 	typeFilter := lp.typeSel.Selected
 
-	// 过滤日志
 	var filteredEntries []LogEntry
 	for _, entry := range lp.logBuffer {
-		// 按级别过滤
 		if levelFilter != "全部" && entry.Level != levelFilter {
 			continue
 		}
-
-		// 按类型过滤
 		if typeFilter != "全部" && entry.Type != typeFilter {
 			continue
 		}
-
 		filteredEntries = append(filteredEntries, entry)
 	}
 
-	// 构建显示文本 - 优化字体和行高
+	// 只显示最近 maxDisplayLines 条，减少 RichText 内存占用
+	start := 0
+	if len(filteredEntries) > maxDisplayLines {
+		start = len(filteredEntries) - maxDisplayLines
+	}
+	displayEntries := filteredEntries[start:]
+	lp.bufferMutex.Unlock()
+
 	var segments []widget.RichTextSegment
-	for _, entry := range filteredEntries {
-		// 根据日志级别设置不同的颜色（在黑白主题中，使用不同的灰度）
-		colorName := theme.ColorNameForeground
-		// 可以根据级别调整样式，但保持黑白主题
+	for _, entry := range displayEntries {
 		segments = append(segments, &widget.TextSegment{
 			Text: entry.Line + "\n",
 			Style: widget.RichTextStyle{
-				ColorName: colorName,
-				TextStyle: fyne.TextStyle{Monospace: true}, // 等宽字体
+				ColorName: theme.ColorNameForeground,
+				TextStyle: fyne.TextStyle{Monospace: true},
 			},
 		})
 	}
 
-	// 更新日志内容
 	fyne.Do(func() {
 		lp.logContent.Segments = segments
 		lp.logContent.Refresh()
@@ -462,6 +435,10 @@ func (lp *LogsPanel) StartLogFileWatcher() {
 	logFilePath := lp.appState.Logger.GetLogFilePath()
 	if logFilePath == "" {
 		return
+	}
+	// 使用绝对路径，确保与 Logger 写入的文件一致（避免 cwd 差异）
+	if abs, err := filepath.Abs(logFilePath); err == nil {
+		logFilePath = abs
 	}
 
 	// 如果监控器已存在，先关闭
@@ -509,6 +486,9 @@ func (lp *LogsPanel) watchLogFile() {
 	defer lp.fileWatcher.Close()
 
 	logFilePath := lp.appState.Logger.GetLogFilePath()
+	if abs, err := filepath.Abs(logFilePath); err == nil {
+		logFilePath = abs
+	}
 	ticker := time.NewTicker(500 * time.Millisecond) // 每 500ms 检查一次文件变化
 	defer ticker.Stop()
 
@@ -523,9 +503,11 @@ func (lp *LogsPanel) watchLogFile() {
 			if !ok {
 				return
 			}
-			// 检查是否是目标日志文件的变化
-			if event.Op&fsnotify.Write == fsnotify.Write && event.Name == logFilePath {
-				lp.readNewLogLines(logFilePath)
+			// 检查是否是目标日志文件的变化（使用绝对路径比较，兼容不同平台）
+			if event.Op&fsnotify.Write == fsnotify.Write {
+				if absEvent, err := filepath.Abs(event.Name); err == nil && absEvent == logFilePath {
+					lp.readNewLogLines(logFilePath)
+				}
 			}
 		case err, ok := <-lp.fileWatcher.Errors:
 			if !ok {
@@ -572,8 +554,11 @@ func (lp *LogsPanel) readNewLogLines(logFilePath string) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != "" {
-			// 使用统一的AppendLogLine方法，确保格式一致性
-			lp.AppendLogLine(line)
+			if lp.appState != nil && lp.appState.OnLogLine != nil {
+				lp.appState.OnLogLine(line)
+			} else {
+				lp.AppendLogLine(line)
+			}
 		}
 	}
 
@@ -586,6 +571,12 @@ func (lp *LogsPanel) Stop() {
 	if lp.cancel != nil {
 		lp.cancel()
 	}
+	lp.refreshTimerMu.Lock()
+	if lp.refreshTimer != nil {
+		lp.refreshTimer.Stop()
+		lp.refreshTimer = nil
+	}
+	lp.refreshTimerMu.Unlock()
 	if lp.fileWatcher != nil {
 		lp.fileWatcher.Close()
 	}

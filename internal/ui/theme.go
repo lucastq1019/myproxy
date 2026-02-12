@@ -164,26 +164,8 @@ func (t *MonochromeTheme) Font(style fyne.TextStyle) fyne.Resource {
 	return theme.DefaultTheme().Font(style)
 }
 
-// Size 返回自定义尺寸，增加内边距和间距以提升视觉体验
+// Size 返回尺寸配置。
+// 这里直接使用 Fyne 默认尺寸，避免自定义尺寸导致图标或间距异常放大。
 func (t *MonochromeTheme) Size(name fyne.ThemeSizeName) float32 {
-	switch name {
-	case theme.SizeNamePadding:
-		return 12 // 增加内边距（默认8）
-	case theme.SizeNameScrollBar:
-		return 16 // 滚动条宽度
-	case theme.SizeNameScrollBarSmall:
-		return 3 // 小滚动条
-	case theme.SizeNameSeparatorThickness:
-		return 1 // 分隔线更细
-	case theme.SizeNameInputBorder:
-		return 1 // 输入框边框
-	case theme.SizeNameInputRadius:
-		return 6 // 输入框圆角，更圆润
-	case theme.SizeNameSelectionRadius:
-		return 6 // 选中圆角，更圆润
-	case theme.SizeNameInlineIcon:
-		return 20 // 内联图标
-	}
-	// 其他尺寸使用默认值
 	return theme.DefaultTheme().Size(name)
 }

@@ -317,6 +317,31 @@ func (l *Logger) GetLogFilePath() string {
 	return l.logFilePath
 }
 
+// WriteRawLine 追加原始日志行，用于 xray 劫持的日志落盘。
+// 若行首无时间戳（不以 20xx/ 开头），则补全为 xray 标准格式：2026/02/12 10:43:05.123456 from tcp:...
+func (l *Logger) WriteRawLine(line string) {
+	if l == nil || l.file == nil || strings.TrimSpace(line) == "" {
+		return
+	}
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	toWrite := line
+	// 补全时间戳：xray 劫持有时不带时间戳，统一为 2026/02/12 10:43:05.123456 from...
+	if !strings.HasPrefix(strings.TrimSpace(line), "20") {
+		ts := time.Now().Format("2006/01/02 15:04:05.000000")
+		toWrite = ts + " " + strings.TrimLeft(line, " \t")
+	}
+	if !strings.HasSuffix(toWrite, "\n") {
+		toWrite += "\n"
+	}
+	if _, err := l.file.WriteString(toWrite); err != nil {
+		l.reopenFile()
+		if l.file != nil {
+			l.file.WriteString(toWrite)
+		}
+	}
+}
+
 // Log 记录日志（通用方法，支持外部调用）
 func (l *Logger) Log(level, logType, message string) {
 	// 解析日志级别

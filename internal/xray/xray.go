@@ -10,9 +10,11 @@ import (
 	// 导入所有 xray-core 组件，注册必要的处理器
 	_ "github.com/xtls/xray-core/main/distro/all"
 
+	"github.com/xtls/xray-core/app/log"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/infra/conf"
+	clog "github.com/xtls/xray-core/common/log"
 	"myproxy.com/p/internal/model"
 )
 
@@ -135,6 +137,56 @@ func (lw *logWriter) shouldFilterLog(line string) bool {
 	return false
 }
 
+// xrayInterceptorWriter 实现 clog.Writer，将 xray 日志转发到回调（保持原始格式）。
+type xrayInterceptorWriter struct {
+	callback LogCallback
+}
+
+func (w *xrayInterceptorWriter) Write(s string) error {
+	if w.callback != nil && strings.TrimSpace(s) != "" {
+		level := "INFO"
+		upper := strings.ToUpper(s)
+		if strings.Contains(upper, "ERROR") {
+			level = "ERROR"
+		} else if strings.Contains(upper, "WARN") {
+			level = "WARN"
+		} else if strings.Contains(upper, "DEBUG") {
+			level = "DEBUG"
+		}
+		w.callback(level, s)
+	}
+	return nil
+}
+
+func (w *xrayInterceptorWriter) Close() error {
+	return nil
+}
+
+var (
+	interceptCallbackMu sync.Mutex
+	interceptCallback   LogCallback
+)
+
+// registerInterceptorHandler 注册自定义 LogType_Console 处理器，将 xray 日志重定向到 callback。
+// 劫持后由 callback 决定：落盘、面板展示、访问记录入库。
+func registerInterceptorHandler(callback LogCallback) {
+	interceptCallbackMu.Lock()
+	interceptCallback = callback
+	interceptCallbackMu.Unlock()
+
+	creator := func(lt log.LogType, options log.HandlerCreatorOptions) (clog.Handler, error) {
+		interceptCallbackMu.Lock()
+		cb := interceptCallback
+		interceptCallbackMu.Unlock()
+
+		writerCreator := func() clog.Writer {
+			return &xrayInterceptorWriter{callback: cb}
+		}
+		return clog.NewLogger(writerCreator), nil
+	}
+	_ = log.RegisterHandlerCreator(log.LogType_Console, creator)
+}
+
 // XrayInstance 封装 xray-core 实例
 type XrayInstance struct {
 	instance    *core.Instance
@@ -151,8 +203,11 @@ func NewXrayInstanceFromJSON(configJSON []byte) (*XrayInstance, error) {
 	return NewXrayInstanceFromJSONWithCallback(configJSON, nil)
 }
 
-// NewXrayInstanceFromJSONWithCallback 从 JSON 配置创建 xray-core 实例，并设置日志回调
+// NewXrayInstanceFromJSONWithCallback 从 JSON 配置创建 xray-core 实例，并设置日志回调。
+// 日志通过 registerInterceptorHandler 劫持，由 callback 落盘、展示、解析访问记录。
 func NewXrayInstanceFromJSONWithCallback(configJSON []byte, logCallback LogCallback) (*XrayInstance, error) {
+	registerInterceptorHandler(logCallback)
+
 	var config conf.Config
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return nil, fmt.Errorf("Xray: 解析配置失败: %w", err)
@@ -538,13 +593,10 @@ func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, rou
 		"settings": map[string]interface{}{},
 	}
 
-	// 构建日志配置
+	// 构建日志配置：不设置 access/error，使用 Console 类型，由 registerInterceptorHandler 劫持
+	// 劫持后由 callback 落盘、展示、解析（保持原始格式，便于 access record 按 fields[5] 解析）
 	logConfig := map[string]interface{}{
 		"loglevel": "warning",
-	}
-	if logFilePath != "" {
-		logConfig["error"] = logFilePath
-		logConfig["access"] = logFilePath
 	}
 
 	// 构建路由规则（含用户直连列表与是否走代理）

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"myproxy.com/p/internal/model"
 )
 
 // SettingsMenu 设置菜单项
@@ -19,6 +21,7 @@ const (
 	SettingsMenuAppearance SettingsMenu = iota
 	SettingsMenuDirectRoute
 	SettingsMenuLog
+	SettingsMenuAccessRecord
 	SettingsMenuAbout
 )
 
@@ -46,6 +49,8 @@ func (m SettingsMenu) String() string {
 		return "代理配置"
 	case SettingsMenuLog:
 		return "日志"
+	case SettingsMenuAccessRecord:
+		return "访问记录"
 	case SettingsMenuAbout:
 		return "关于"
 	default:
@@ -95,7 +100,7 @@ func (f fixedMenuContentLayout) Layout(objects []fyne.CanvasObject, size fyne.Si
 type SettingsPage struct {
 	appState    *AppState
 	content     fyne.CanvasObject
-	menuButtons [4]*widget.Button
+	menuButtons [5]*widget.Button
 	contentCard *fyne.Container
 	currentMenu SettingsMenu
 
@@ -107,6 +112,10 @@ type SettingsPage struct {
 
 	// 日志：在设置页「日志」菜单中复用，用于查看日志
 	logsPanel *LogsPanel
+
+	// 访问记录相关
+	accessRecordsList *widget.List
+	accessRecordsData []model.AccessRecord
 }
 
 // NewSettingsPage 创建设置页面实例。
@@ -139,7 +148,8 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	sp.menuButtons[0] = widget.NewButton("外观", func() { sp.switchMenu(SettingsMenuAppearance) })
 	sp.menuButtons[1] = widget.NewButton("代理配置", func() { sp.switchMenu(SettingsMenuDirectRoute) })
 	sp.menuButtons[2] = widget.NewButton("日志", func() { sp.switchMenu(SettingsMenuLog) })
-	sp.menuButtons[3] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
+	sp.menuButtons[3] = widget.NewButton("访问记录", func() { sp.switchMenu(SettingsMenuAccessRecord) })
+	sp.menuButtons[4] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
 
 	for i := range sp.menuButtons {
 		sp.menuButtons[i].Importance = widget.LowImportance
@@ -151,6 +161,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[1],
 		sp.menuButtons[2],
 		sp.menuButtons[3],
+		sp.menuButtons[4],
 	)
 	menuBox := container.NewPadded(menuContent)
 
@@ -183,6 +194,8 @@ func (sp *SettingsPage) switchMenu(menu SettingsMenu) {
 		sp.contentCard.Add(sp.buildDirectRouteContent())
 	case SettingsMenuLog:
 		sp.contentCard.Add(sp.buildLogContent())
+	case SettingsMenuAccessRecord:
+		sp.contentCard.Add(sp.buildAccessRecordContent())
 	case SettingsMenuAbout:
 		sp.contentCard.Add(sp.buildAboutContent())
 	}
@@ -514,10 +527,117 @@ func isLikelyIPOrCIDR(s string) bool {
 
 // buildLogContent 构建设置「日志」内容区，嵌入完整日志面板用于查看日志。
 func (sp *SettingsPage) buildLogContent() fyne.CanvasObject {
+	if sp.appState != nil && sp.appState.LogsPanel != nil {
+		return sp.appState.LogsPanel.Build()
+	}
 	if sp.logsPanel == nil {
 		sp.logsPanel = NewLogsPanel(sp.appState)
 	}
 	return sp.logsPanel.Build()
+}
+
+// buildAccessRecordContent 构建设置「访问记录」内容区，展示访问的网站及累计访问次数。
+func (sp *SettingsPage) buildAccessRecordContent() fyne.CanvasObject {
+	sp.loadAccessRecords()
+
+	sp.accessRecordsList = widget.NewList(
+		func() int { return len(sp.accessRecordsData) },
+		func() fyne.CanvasObject {
+			addrLabel := widget.NewLabel("")
+			addrLabel.Wrapping = fyne.TextWrapWord // 宽度过宽时自动换行
+			countLabel := widget.NewLabel("")
+			return container.NewVBox(
+				addrLabel,
+				container.NewHBox(layout.NewSpacer(), countLabel),
+			)
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			if id < 0 || id >= len(sp.accessRecordsData) {
+				return
+			}
+			r := sp.accessRecordsData[id]
+			displayAddr := r.Address
+			if displayAddr == "" {
+				displayAddr = r.Domain
+			}
+			countText := fmt.Sprintf("访问 %d 次", r.AccessCount)
+			labels := collectLabelsFromObject(obj)
+			if len(labels) >= 2 {
+				labels[0].SetText(displayAddr)
+				labels[1].SetText(countText)
+			}
+		},
+	)
+
+	clearBtn := widget.NewButtonWithIcon("清空记录", theme.DeleteIcon(), func() {
+		if sp.appState == nil || sp.appState.Window == nil {
+			return
+		}
+		dialog.ShowConfirm("清空访问记录", "确定要清空所有访问记录吗？此操作不可恢复。", func(ok bool) {
+			if !ok {
+				return
+			}
+			if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.AccessRecords != nil {
+				_ = sp.appState.Store.AccessRecords.ClearAll()
+				_ = sp.appState.Store.AccessRecords.Load()
+				sp.loadAccessRecords()
+				if sp.accessRecordsList != nil {
+					sp.accessRecordsList.Refresh()
+				}
+			}
+		}, sp.appState.Window)
+	})
+	clearBtn.Importance = widget.LowImportance
+
+	refreshBtn := widget.NewButtonWithIcon("刷新", theme.ViewRefreshIcon(), func() {
+		sp.loadAccessRecords()
+		if sp.accessRecordsList != nil {
+			sp.accessRecordsList.Refresh()
+		}
+	})
+	refreshBtn.Importance = widget.LowImportance
+
+	topBar := container.NewHBox(
+		widget.NewLabel("访问的地址（host:port，按最近访问时间排序）"),
+		layout.NewSpacer(),
+		refreshBtn,
+		clearBtn,
+	)
+
+	listScroll := container.NewScroll(sp.accessRecordsList)
+	listScroll.SetMinSize(fyne.NewSize(0, 200))
+
+	return container.NewBorder(
+		container.NewVBox(topBar, NewSeparator()),
+		nil, nil, nil,
+		listScroll,
+	)
+}
+
+// loadAccessRecords 从 Store 加载访问记录。
+func (sp *SettingsPage) loadAccessRecords() {
+	sp.accessRecordsData = nil
+	if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.AccessRecords != nil {
+		sp.accessRecordsData = sp.appState.Store.AccessRecords.GetAll()
+	}
+	if sp.accessRecordsData == nil {
+		sp.accessRecordsData = []model.AccessRecord{}
+	}
+}
+
+// collectLabelsFromObject 递归收集 CanvasObject 树中的 *widget.Label，保持遍历顺序。
+func collectLabelsFromObject(obj fyne.CanvasObject) []*widget.Label {
+	var labels []*widget.Label
+	if c, ok := obj.(*fyne.Container); ok {
+		for _, o := range c.Objects {
+			if l, ok := o.(*widget.Label); ok {
+				labels = append(labels, l)
+			} else {
+				labels = append(labels, collectLabelsFromObject(o)...)
+			}
+		}
+	}
+	return labels
 }
 
 // buildAboutContent 构建设置「关于」内容区。

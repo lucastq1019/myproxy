@@ -16,12 +16,13 @@ import (
 )
 
 type Store struct {
-	initialized  bool
-	Nodes        *NodesStore
-	Subscriptions *SubscriptionsStore
-	Layout       *LayoutStore
-	AppConfig    *AppConfigStore
-	ProxyStatus  *ProxyStatusStore
+	initialized     bool
+	Nodes           *NodesStore
+	Subscriptions   *SubscriptionsStore
+	Layout          *LayoutStore
+	AppConfig       *AppConfigStore
+	ProxyStatus     *ProxyStatusStore
+	AccessRecords   *AccessRecordsStore
 }
 
 func NewStore(subscriptionManager *subscription.SubscriptionManager) *Store {
@@ -31,6 +32,7 @@ func NewStore(subscriptionManager *subscription.SubscriptionManager) *Store {
 		Layout:        NewLayoutStore(),
 		AppConfig:     NewAppConfigStore(),
 		ProxyStatus:   NewProxyStatusStore(),
+		AccessRecords: NewAccessRecordsStore(),
 	}
 	s.Subscriptions.setParentStore(s)
 	return s
@@ -41,6 +43,7 @@ func (s *Store) LoadAll() {
 	s.Subscriptions.Load()
 	s.Layout.Load()
 	s.AppConfig.Load()
+	_ = s.AccessRecords.Load()
 	// 将当前选中的服务器 ID 同步到 AppConfig，供自动启动等逻辑使用
 	if id := s.Nodes.GetSelectedID(); id != "" {
 		_ = s.AppConfig.Set("selectedServerID", id)
@@ -585,4 +588,68 @@ func (ps *ProxyStatusStore) UpdateProxyStatus(xrayInstance interface {
 	} else {
 		ps.ServerNameBinding.Set("无")
 	}
+}
+
+// AccessRecordsStore 访问记录存储，用于流量分析。
+type AccessRecordsStore struct {
+	mu      sync.RWMutex
+	records []model.AccessRecord
+}
+
+func NewAccessRecordsStore() *AccessRecordsStore {
+	return &AccessRecordsStore{
+		records: make([]model.AccessRecord, 0),
+	}
+}
+
+func (ars *AccessRecordsStore) Load() error {
+	records, err := database.GetAllAccessRecords()
+	if err != nil {
+		return fmt.Errorf("访问记录存储: 加载失败: %w", err)
+	}
+	ars.mu.Lock()
+	ars.records = records
+	ars.mu.Unlock()
+	return nil
+}
+
+func (ars *AccessRecordsStore) GetAll() []model.AccessRecord {
+	ars.mu.RLock()
+	defer ars.mu.RUnlock()
+	result := make([]model.AccessRecord, len(ars.records))
+	copy(result, ars.records)
+	return result
+}
+
+// RecordAccess 记录访问，address 为 host:port。
+func (ars *AccessRecordsStore) RecordAccess(address string, count, uploadBytes, downloadBytes int64) error {
+	if err := database.InsertOrUpdateAccessRecord(address, count, uploadBytes, downloadBytes); err != nil {
+		return err
+	}
+	return ars.Load()
+}
+
+// RecordAccessBatch 批量记录访问，key 为 address (host:port)。
+func (ars *AccessRecordsStore) RecordAccessBatch(addressCounts map[string]int64) error {
+	if err := database.BatchInsertOrUpdateAccessRecords(addressCounts); err != nil {
+		return err
+	}
+	return ars.Load()
+}
+
+func (ars *AccessRecordsStore) Delete(id int64) error {
+	if err := database.DeleteAccessRecord(id); err != nil {
+		return err
+	}
+	return ars.Load()
+}
+
+func (ars *AccessRecordsStore) ClearAll() error {
+	if err := database.ClearAllAccessRecords(); err != nil {
+		return err
+	}
+	ars.mu.Lock()
+	ars.records = nil
+	ars.mu.Unlock()
+	return nil
 }

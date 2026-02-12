@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"myproxy.com/p/internal/model"
 )
 
 // DB 数据库连接
@@ -113,6 +115,22 @@ func createTables() error {
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 
+	// 创建访问记录表（用于流量分析：记录访问的网站及累计访问次数）
+	// address 存储 host:port，如 api2.cursor.sh:443，避免不同端口丢失信息
+	createAccessRecordsTable := `
+	CREATE TABLE IF NOT EXISTS access_records (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		domain TEXT NOT NULL,
+		address TEXT NOT NULL UNIQUE,
+		access_count INTEGER NOT NULL DEFAULT 0,
+		upload_bytes INTEGER NOT NULL DEFAULT 0,
+		download_bytes INTEGER NOT NULL DEFAULT 0,
+		first_seen DATETIME NOT NULL,
+		last_seen DATETIME NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);`
+
 	// 创建索引
 	createIndexes := `
 	CREATE INDEX IF NOT EXISTS idx_servers_subscription_id ON servers(subscription_id);
@@ -120,6 +138,8 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_subscriptions_url ON subscriptions(url);
 	CREATE INDEX IF NOT EXISTS idx_layout_config_key ON layout_config(key);
 	CREATE INDEX IF NOT EXISTS idx_app_config_key ON app_config(key);
+	CREATE INDEX IF NOT EXISTS idx_access_records_address ON access_records(address);
+	CREATE INDEX IF NOT EXISTS idx_access_records_last_seen ON access_records(last_seen);
 	`
 
 	if _, err := DB.Exec(createSubscriptionsTable); err != nil {
@@ -136,6 +156,15 @@ func createTables() error {
 
 	if _, err := DB.Exec(createAppConfigTable); err != nil {
 		return fmt.Errorf("创建应用配置表失败: %w", err)
+	}
+
+	if _, err := DB.Exec(createAccessRecordsTable); err != nil {
+		return fmt.Errorf("创建访问记录表失败: %w", err)
+	}
+
+	// 先迁移 access_records（旧表无 address 列），再创建依赖 address 的索引
+	if err := migrateAccessRecordsTable(); err != nil {
+		return fmt.Errorf("迁移 access_records 表失败: %w", err)
 	}
 
 	if _, err := DB.Exec(createIndexes); err != nil {
@@ -246,6 +275,64 @@ func migrateTables() error {
 		}
 	}
 
+	return nil
+}
+
+// migrateAccessRecordsTable 迁移 access_records 表，添加 address 字段。
+// 旧表只有 domain，新表以 address (host:port) 为唯一键。
+func migrateAccessRecordsTable() error {
+	rows, err := DB.Query("PRAGMA table_info(access_records)")
+	if err != nil {
+		return nil // 表可能不存在
+	}
+	defer rows.Close()
+
+	hasAddress := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notnull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notnull, &dfltValue, &pk); err != nil {
+			continue
+		}
+		if name == "address" {
+			hasAddress = true
+			break
+		}
+	}
+	if hasAddress {
+		return nil
+	}
+
+	// 旧表无 address，需重建表
+	_, err = DB.Exec(`
+		CREATE TABLE access_records_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			domain TEXT NOT NULL,
+			address TEXT NOT NULL UNIQUE,
+			access_count INTEGER NOT NULL DEFAULT 0,
+			upload_bytes INTEGER NOT NULL DEFAULT 0,
+			download_bytes INTEGER NOT NULL DEFAULT 0,
+			first_seen DATETIME NOT NULL,
+			last_seen DATETIME NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		INSERT INTO access_records_new (id, domain, address, access_count, upload_bytes, download_bytes, first_seen, last_seen, created_at, updated_at)
+		SELECT id, domain, domain || ':443', access_count, upload_bytes, download_bytes, first_seen, last_seen, created_at, updated_at
+		FROM access_records;
+		DROP TABLE access_records;
+		ALTER TABLE access_records_new RENAME TO access_records;
+	`)
+	if err != nil {
+		return fmt.Errorf("迁移 access_records 表失败: %w", err)
+	}
+
+	_, _ = DB.Exec("CREATE INDEX IF NOT EXISTS idx_access_records_address ON access_records(address)")
+	_, _ = DB.Exec("CREATE INDEX IF NOT EXISTS idx_access_records_last_seen ON access_records(last_seen)")
 	return nil
 }
 
@@ -823,6 +910,124 @@ func GetAppConfigWithDefault(key, defaultValue string) (string, error) {
 		return defaultValue, nil
 	}
 	return value, nil
+}
+
+// InsertOrUpdateAccessRecord 插入或更新访问记录。
+// address 为 host:port，如 api2.cursor.sh:443；若已存在则累加 access_count 并更新 last_seen。
+func InsertOrUpdateAccessRecord(address string, count int64, uploadBytes, downloadBytes int64) error {
+	now := time.Now()
+	if count <= 0 {
+		count = 1
+	}
+	// domain 为 address 的 host 部分，用于兼容
+	domain := extractHostFromAddress(address)
+	_, err := DB.Exec(
+		`INSERT INTO access_records (domain, address, access_count, upload_bytes, download_bytes, first_seen, last_seen, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(address) DO UPDATE SET
+			access_count = access_count + excluded.access_count,
+			upload_bytes = upload_bytes + excluded.upload_bytes,
+			download_bytes = download_bytes + excluded.download_bytes,
+			last_seen = excluded.last_seen,
+			updated_at = excluded.updated_at`,
+		domain, address, count, uploadBytes, downloadBytes, now, now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("插入或更新访问记录失败: %w", err)
+	}
+	return nil
+}
+
+// BatchInsertOrUpdateAccessRecords 批量插入或更新访问记录（用于初始加载历史日志时优化性能）。
+// records 的 key 为 address (host:port)。
+func BatchInsertOrUpdateAccessRecords(records map[string]int64) error {
+	if len(records) == 0 {
+		return nil
+	}
+	tx, err := DB.Begin()
+	if err != nil {
+		return fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+	stmt, err := tx.Prepare(
+		`INSERT INTO access_records (domain, address, access_count, upload_bytes, download_bytes, first_seen, last_seen, updated_at)
+		 VALUES (?, ?, ?, 0, 0, ?, ?, ?)
+		 ON CONFLICT(address) DO UPDATE SET
+			access_count = access_count + excluded.access_count,
+			last_seen = excluded.last_seen,
+			updated_at = excluded.updated_at`,
+	)
+	if err != nil {
+		return fmt.Errorf("准备语句失败: %w", err)
+	}
+	defer stmt.Close()
+
+	for address, count := range records {
+		if address == "" || count <= 0 {
+			continue
+		}
+		domain := extractHostFromAddress(address)
+		if _, err := stmt.Exec(domain, address, count, now, now, now); err != nil {
+			return fmt.Errorf("插入访问记录失败: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交事务失败: %w", err)
+	}
+	return nil
+}
+
+func extractHostFromAddress(address string) string {
+	if idx := strings.LastIndex(address, ":"); idx > 0 {
+		return address[:idx]
+	}
+	return address
+}
+
+// GetAllAccessRecords 获取所有访问记录，按 last_seen 倒序。
+func GetAllAccessRecords() ([]model.AccessRecord, error) {
+	rows, err := DB.Query(
+		`SELECT id, domain, address, access_count, upload_bytes, download_bytes, first_seen, last_seen
+		 FROM access_records ORDER BY last_seen DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("查询访问记录失败: %w", err)
+	}
+	defer rows.Close()
+
+	var records []model.AccessRecord
+	for rows.Next() {
+		var r model.AccessRecord
+		if err := rows.Scan(&r.ID, &r.Domain, &r.Address, &r.AccessCount, &r.UploadBytes, &r.DownloadBytes, &r.FirstSeen, &r.LastSeen); err != nil {
+			return nil, fmt.Errorf("扫描访问记录失败: %w", err)
+		}
+		records = append(records, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历访问记录失败: %w", err)
+	}
+	return records, nil
+}
+
+// DeleteAccessRecord 删除指定 ID 的访问记录。
+func DeleteAccessRecord(id int64) error {
+	_, err := DB.Exec("DELETE FROM access_records WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("删除访问记录失败: %w", err)
+	}
+	return nil
+}
+
+// ClearAllAccessRecords 清空所有访问记录。
+func ClearAllAccessRecords() error {
+	_, err := DB.Exec("DELETE FROM access_records")
+	if err != nil {
+		return fmt.Errorf("清空访问记录失败: %w", err)
+	}
+	return nil
 }
 
 // boolToInt 将布尔值转换为整数

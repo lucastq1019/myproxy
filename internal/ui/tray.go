@@ -166,8 +166,8 @@ func (tm *TrayManager) refreshProxyModeMenu() {
 // quit 退出应用
 func (tm *TrayManager) quit() {
 	// 停止日志监控
-	if tm.appState.MainWindow != nil && tm.appState.MainWindow.logsPanel != nil {
-		tm.appState.MainWindow.logsPanel.Stop()
+	if tm.appState.LogsPanel != nil {
+		tm.appState.LogsPanel.Stop()
 	}
 
 	// 保存布局配置

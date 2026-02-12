@@ -9,23 +9,24 @@ import (
 
 // XrayControlService 代理控制服务层，提供 xray 代理启动和停止的业务逻辑。
 type XrayControlService struct {
-	store       *store.Store
-	config      *ConfigService
-	logCallback func(level, message string)
+	store          *store.Store
+	config         *ConfigService
+	logCallback    func(level, message string)      // 应用级消息（如启动成功）
+	rawLogCallback func(level, rawLine string)     // xray 劫持的原始日志行：落盘、展示、解析
 }
 
 // NewXrayControlService 创建新的代理控制服务实例。
 // 参数：
 //   - store: Store 实例，用于数据访问
 //   - config: ConfigService，用于读取直连路由等配置
-//   - logCallback: 日志回调函数，用于记录日志
-//
-// 返回：初始化后的 XrayControlService 实例
-func NewXrayControlService(store *store.Store, config *ConfigService, logCallback func(level, message string)) *XrayControlService {
+//   - logCallback: 应用级日志回调（如启动成功）
+//   - rawLogCallback: xray 劫持的原始日志回调，nil 则用 logCallback
+func NewXrayControlService(store *store.Store, config *ConfigService, logCallback func(level, message string), rawLogCallback func(level, rawLine string)) *XrayControlService {
 	return &XrayControlService{
-		store:       store,
-		config:      config,
-		logCallback: logCallback,
+		store:          store,
+		config:         config,
+		logCallback:    logCallback,
+		rawLogCallback: rawLogCallback,
 	}
 }
 
@@ -94,8 +95,8 @@ func (xcs *XrayControlService) StartProxy(oldInstance *xray.XrayInstance, logFil
 		}
 	}
 
-	// 创建 xray 配置（含日志路径与路由选项）
-	xrayConfigJSON, err := xray.CreateXrayConfig(proxyPort, selectedNode, logFilePath, routing)
+	// 创建 xray 配置（不设日志路径，由劫持 handler 落盘）
+	xrayConfigJSON, err := xray.CreateXrayConfig(proxyPort, selectedNode, "", routing)
 	if err != nil {
 		logMsg := fmt.Sprintf("创建xray配置失败: %v", err)
 		if xcs.logCallback != nil {
@@ -112,15 +113,14 @@ func (xcs *XrayControlService) StartProxy(oldInstance *xray.XrayInstance, logFil
 		xcs.logCallback("DEBUG", fmt.Sprintf("xray配置已创建: %s", selectedNode.Name))
 	}
 
-	// 创建日志回调函数，将 xray 日志转发到应用日志系统
-	logCallback := func(level, message string) {
-		if xcs.logCallback != nil {
-			xcs.logCallback(level, message)
-		}
+	// 创建 xray 实例的日志回调：优先用 rawLogCallback（落盘+展示+解析），否则用 logCallback
+	xrayLogCallback := xcs.rawLogCallback
+	if xrayLogCallback == nil {
+		xrayLogCallback = xcs.logCallback
 	}
 
 	// 创建xray实例，并设置日志回调（每次配置变化都需要重新创建实例）
-	xrayInstance, err := xray.NewXrayInstanceFromJSONWithCallback(xrayConfigJSON, logCallback)
+	xrayInstance, err := xray.NewXrayInstanceFromJSONWithCallback(xrayConfigJSON, xrayLogCallback)
 	if err != nil {
 		logMsg := fmt.Sprintf("创建xray实例失败: %v", err)
 		if xcs.logCallback != nil {

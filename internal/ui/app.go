@@ -30,12 +30,17 @@ type AppState struct {
 	ConfigService       *service.ConfigService
 	ProxyService        *service.ProxyService
 	SubscriptionService *service.SubscriptionService
-	XrayControlService  *service.XrayControlService
+	XrayControlService   *service.XrayControlService
+	AccessRecordService *service.AccessRecordService
 	XrayInstance        *xray.XrayInstance
+	LogsPanel           *LogsPanel // 日志面板，仅设置页使用；OnLogLine 分发到此
 	ProxyStatusBinding  binding.String
 	PortBinding         binding.String
 	ServerNameBinding   binding.String
 	LogCallback         func(level, logType, message string)
+	// OnLogLine 统一日志入口：收到完整日志行时调用，用于分发到展示和访问记录。
+	// 由 MainWindow 设置，供 Logger 的 panelCallback 和文件读取使用。
+	OnLogLine func(logLine string)
 }
 
 func NewAppState() *AppState {
@@ -57,15 +62,13 @@ func NewAppState() *AppState {
 		ProxyStatusBinding:  dataStore.ProxyStatus.ProxyStatusBinding,
 		PortBinding:         dataStore.ProxyStatus.PortBinding,
 		ServerNameBinding:   dataStore.ProxyStatus.ServerNameBinding,
-		ProxyService:        service.NewProxyService(nil),
-		XrayControlService:  service.NewXrayControlService(dataStore, configService, nil),
+		ProxyService:         service.NewProxyService(nil),
+		XrayControlService:   service.NewXrayControlService(dataStore, configService, nil, nil),
+		AccessRecordService:  service.NewAccessRecordService(dataStore),
 	}
 
-	appState.LogCallback = func(level, logType, message string) {
-		if appState.Logger != nil {
-			appState.Logger.Log(level, logType, message)
-		}
-	}
+	// LogCallback 保留用于兼容，但展示已改为通过 OnLogLine 统一分发
+	appState.LogCallback = nil
 
 	return appState
 }
@@ -91,6 +94,8 @@ func (a *AppState) refreshTrayProxyMenu() {
 
 func (a *AppState) InitApp() error {
 	a.App = app.NewWithID("com.myproxy.socks5")
+	// 应用主题（从配置加载）
+	a.ApplyTheme()
 
 	appIcon := createAppIcon(a)
 	if appIcon != nil {
@@ -99,9 +104,6 @@ func (a *AppState) InitApp() error {
 	} else {
 		a.SafeLogger.Warn("应用图标创建失败")
 	}
-
-	// 应用主题（从配置加载）
-	a.ApplyTheme()
 
 	a.Window = a.App.NewWindow("myproxy")
 
@@ -123,8 +125,8 @@ func (a *AppState) InitApp() error {
 
 func (a *AppState) InitLogger() error {
 	logCallback := func(level, logType, message, logLine string) {
-		if a.LogCallback != nil {
-			a.LogCallback(level, logType, message)
+		if a.OnLogLine != nil {
+			a.OnLogLine(logLine)
 		}
 	}
 
@@ -148,22 +150,30 @@ func (a *AppState) InitLogger() error {
 	a.SafeLogger.SetLogger(logger)
 
 	if a.XrayControlService != nil {
+		// logCallback: 应用级消息（如启动成功）走 AppendLog
+		// rawLogCallback: xray 劫持的原始日志 -> 落盘、展示、解析访问记录
 		realLogCallback := func(level, message string) {
 			a.AppendLog(level, "xray", message)
 		}
-		a.XrayControlService = service.NewXrayControlService(a.Store, a.ConfigService, realLogCallback)
+		rawLogCallback := func(level, rawLine string) {
+			if a.Logger != nil {
+				a.Logger.WriteRawLine(rawLine)
+			}
+			if a.OnLogLine != nil {
+				a.OnLogLine(rawLine)
+			}
+		}
+		a.XrayControlService = service.NewXrayControlService(a.Store, a.ConfigService, realLogCallback, rawLogCallback)
 	}
 
 	return nil
 }
 
+// AppendLog 追加一条日志。由 Logger 写入文件并调用 panelCallback，统一由 OnLogLine 分发到展示和访问记录。
 func (a *AppState) AppendLog(level, logType, message string) {
 	level = strings.ToUpper(level)
 	if strings.ToLower(logType) != "xray" {
 		logType = "app"
-	}
-	if a.LogCallback != nil {
-		a.LogCallback(level, logType, message)
 	}
 	if a.Logger != nil {
 		a.Logger.Log(level, logType, message)
@@ -213,12 +223,22 @@ func (a *AppState) Startup() error {
 		return fmt.Errorf("应用状态: 初始化应用失败: %w", err)
 	}
 
+	// 创建日志面板并设置 OnLogLine，需在 InitLogger 之前完成
+	a.LogsPanel = NewLogsPanel(a)
+	a.OnLogLine = func(logLine string) {
+		if a.LogsPanel != nil {
+			a.LogsPanel.AppendLogLine(logLine)
+		}
+	}
+
 	mainWindow := NewMainWindow(a)
 	a.MainWindow = mainWindow
 
 	if err := a.InitLogger(); err != nil {
 		return fmt.Errorf("应用状态: 初始化日志失败: %w", err)
 	}
+
+	// xray 日志由劫持 handler 落盘并分发，无需文件监控
 
 	content := mainWindow.Build()
 	if content != nil {
