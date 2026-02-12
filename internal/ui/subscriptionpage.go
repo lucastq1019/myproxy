@@ -28,12 +28,15 @@ func NewSubscriptionPage(appState *AppState) *SubscriptionPage {
 		appState: appState,
 	}
 
-	// 监听 Store 的订阅绑定数据变化，自动刷新列表
+	// 监听 Store 的订阅绑定数据变化，自动刷新列表。
+	// 使用 fyne.Do 确保 UI 刷新在主线程执行（ binding 可能在 goroutine 中触发）
 	if appState != nil && appState.Store != nil && appState.Store.Subscriptions != nil {
 		appState.Store.Subscriptions.SubscriptionsBinding.AddListener(binding.NewDataListener(func() {
-			if sp.list != nil {
-				sp.list.Refresh()
-			}
+			fyne.Do(func() {
+				if sp.list != nil {
+					sp.list.Refresh()
+				}
+			})
 		}))
 	}
 
@@ -187,20 +190,19 @@ func (sp *SubscriptionPage) batchUpdateSubscriptions() {
 			return
 		}
 		go func() {
-			var subscriptions []*database.Subscription
+			var subs []*database.Subscription
 			if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.Subscriptions != nil {
-				subscriptions = sp.appState.Store.Subscriptions.GetAll()
+				subs = sp.appState.Store.Subscriptions.GetAll()
 			}
-			for _, sub := range subscriptions {
-				if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.Subscriptions != nil {
-					if err := sp.appState.Store.Subscriptions.UpdateByID(sub.ID); err != nil {
+			for _, sub := range subs {
+				if sp.appState != nil && sp.appState.SubscriptionService != nil {
+					if err := sp.appState.SubscriptionService.UpdateByID(sub.ID); err != nil {
 						fyne.Do(func() {
 							dialog.ShowError(fmt.Errorf("更新订阅失败: %w", err), sp.appState.Window)
 						})
 					}
 				}
 			}
-			// 更新绑定数据，自动刷新 UI
 			fyne.Do(func() { sp.Refresh() })
 		}()
 	}, sp.appState.Window)
@@ -314,11 +316,11 @@ func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	card.infoLabel.SetText(fmt.Sprintf("%d 节点 · 更新于 %s", nodeCount, lastUpdate))
 
 	// 绑定事件 (基于 ID 操作)
-	card.updateBtn.OnTapped = func() {
+		card.updateBtn.OnTapped = func() {
 		card.updateBtn.Disable()
 		go func() {
-			if card.page != nil && card.page.appState != nil && card.page.appState.Store != nil && card.page.appState.Store.Subscriptions != nil {
-				if err := card.page.appState.Store.Subscriptions.UpdateByID(sub.ID); err != nil {
+			if card.page != nil && card.page.appState != nil && card.page.appState.SubscriptionService != nil {
+				if err := card.page.appState.SubscriptionService.UpdateByID(sub.ID); err != nil {
 					fyne.Do(func() {
 						card.updateBtn.Enable()
 						dialog.ShowError(fmt.Errorf("更新订阅失败: %w", err), card.page.appState.Window)
@@ -326,7 +328,7 @@ func (card *SubscriptionCard) Update(sub *database.Subscription) {
 					return
 				}
 			}
-			// 更新绑定数据，自动刷新 UI
+			// 通过 Service 更新后 Store.Load 已触发绑定，listener 会刷新列表；此处再显式刷新确保 UI 同步
 			fyne.Do(func() {
 				card.updateBtn.Enable()
 				card.page.Refresh()

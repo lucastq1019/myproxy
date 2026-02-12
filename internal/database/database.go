@@ -384,18 +384,16 @@ func AddOrUpdateSubscription(url, label string) (*Subscription, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("查询订阅失败: %w", err)
 	} else {
-		// 存在，更新记录
-		if label != sub.Label {
-			_, err = DB.Exec(
-				"UPDATE subscriptions SET label = ?, updated_at = ? WHERE id = ?",
-				label, now, sub.ID,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("更新订阅失败: %w", err)
-			}
-			sub.Label = label
-			sub.UpdatedAt = now
+		// 存在，更新记录（label 若变化则更新，updated_at 始终更新以反映拉取时间）
+		_, err = DB.Exec(
+			"UPDATE subscriptions SET label = ?, updated_at = ? WHERE id = ?",
+			label, now, sub.ID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("更新订阅失败: %w", err)
 		}
+		sub.Label = label
+		sub.UpdatedAt = now
 	}
 
 	return &sub, nil

@@ -662,13 +662,6 @@ func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 	)
 }
 
-// getSystemThemeVariant 获取系统主题变体
-func getSystemThemeVariant() fyne.ThemeVariant {
-	// 在 Fyne 中，默认的系统主题检测会通过 Settings().ThemeVariant() 提供
-	// 这里我们直接返回，让 Fyne 处理系统主题检测
-	return theme.VariantDark // 默认返回深色，实际会被系统主题覆盖
-}
-
 // onThemeChanged 主题变更回调。
 func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 	if sp.appState == nil || sp.appState.App == nil {
