@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -358,9 +359,6 @@ func NewMainWindow(appState *AppState) *MainWindow {
 	// 创建系统代理管理器（默认使用 localhost:10808）
 	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10808)
 
-	// 注意：系统代理状态的恢复将在 buildHomePage() 中完成
-	// 因为需要先创建 proxyModeRadio 组件
-
 	return mw
 }
 
@@ -368,13 +366,14 @@ func NewMainWindow(appState *AppState) *MainWindow {
 // 该方法使用自定义 Border 布局，支持百分比控制各区域的大小。
 // 返回：主窗口的根容器组件
 func (mw *MainWindow) Build() fyne.CanvasObject {
-	// 新主界面：遵循 UI 设计规范，采用“单窗口 + 多页面”设计。
-	// 通过 Window.SetContent() 在 homePage / nodePage / settingsPage 之间切换。
 
 	// 初始化各页面（home/node/settings）
 	mw.initPages()
 
-	// 默认返回 homePage 作为初始内容
+	// 默认返回 homePage 作为初始内容，并设置主题背景色
+	if mw.homePage != nil && mw.appState != nil && mw.appState.App != nil {
+		return wrapPageWithBackground(mw.homePage, mw.appState.App)
+	}
 	if mw.homePage != nil {
 		return mw.homePage
 	}
@@ -619,6 +618,18 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	)
 }
 
+// wrapPageWithBackground 为页面内容包裹主题背景色。
+func wrapPageWithBackground(content fyne.CanvasObject, app fyne.App) fyne.CanvasObject {
+	if content == nil {
+		return nil
+	}
+	if app == nil {
+		return content
+	}
+	bgRect := canvas.NewRectangle(CurrentThemeColor(app, theme.ColorNameBackground))
+	return container.NewStack(bgRect, content)
+}
+
 // showPage 通用的页面切换方法，会将当前页面压入栈，然后切换到新页面
 func (mw *MainWindow) showPage(pageType PageType, pageContent fyne.CanvasObject, pushCurrent bool) {
 	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
@@ -633,8 +644,7 @@ func (mw *MainWindow) showPage(pageType PageType, pageContent fyne.CanvasObject,
 	// 更新当前页面类型
 	mw.currentPage = pageType
 
-	// 设置内容
-	mw.appState.Window.SetContent(pageContent)
+	mw.appState.Window.SetContent(wrapPageWithBackground(pageContent, mw.appState.App))
 
 	// 从配置读取窗口大小并应用（在 SetContent 之后，避免内容最小尺寸导致窗口变大）
 	defaultSize := fyne.NewSize(420, 520)
@@ -737,6 +747,28 @@ func (mw *MainWindow) ShowSubscriptionPage() {
 	mw.navigateToPage(PageTypeSubscription, true)
 }
 
+// RebuildCurrentPageForTheme 主题切换后重建当前页面，使侧栏/背景等缓存的主题色生效。
+func (mw *MainWindow) RebuildCurrentPageForTheme() {
+	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
+		return
+	}
+	switch mw.currentPage {
+	case PageTypeSettings:
+		if mw.settingsPageInstance != nil {
+			mw.settingsPage = mw.settingsPageInstance.Build()
+			mw.appState.Window.SetContent(wrapPageWithBackground(mw.settingsPage, mw.appState.App))
+		}
+	case PageTypeHome:
+		mw.homePage = mw.buildHomePage()
+		mw.appState.Window.SetContent(wrapPageWithBackground(mw.homePage, mw.appState.App))
+	default:
+		// 其他页面仅刷新根内容，依赖各组件 Refresh 重读主题
+		if c := mw.appState.Window.Canvas().Content(); c != nil {
+			c.Refresh()
+		}
+	}
+}
+
 // onToggleProxy 主开关按钮回调：启动/停止代理
 func (mw *MainWindow) onToggleProxy() {
 	if mw.appState == nil {
@@ -826,6 +858,9 @@ func (mw *MainWindow) startProxy() {
 		mw.appState.UpdateProxyStatus()
 	}
 
+	// 与代理状态同步：更新主开关按钮
+	mw.updateMainToggleButton()
+
 	// 刷新节点页面（如果已创建）
 	if mw.nodePageInstance != nil {
 		mw.nodePageInstance.Refresh()
@@ -881,6 +916,9 @@ func (mw *MainWindow) stopProxy() {
 		mw.appState.UpdateProxyStatus()
 	}
 
+	// 与代理状态同步：更新主开关按钮
+	mw.updateMainToggleButton()
+
 	// 刷新节点页面（如果已创建）
 	if mw.nodePageInstance != nil {
 		mw.nodePageInstance.Refresh()
@@ -894,6 +932,11 @@ func (mw *MainWindow) stopProxy() {
 			dialog.ShowInformation("代理停止成功", "代理已停止", mw.appState.Window)
 		}
 	}
+}
+
+// RefreshMainToggleButton 根据当前代理运行状态刷新主开关按钮（供节点页等调用，保持状态一致）。
+func (mw *MainWindow) RefreshMainToggleButton() {
+	mw.updateMainToggleButton()
 }
 
 // logAndShowError 记录日志并显示错误（统一错误处理）
@@ -955,12 +998,13 @@ func (mw *MainWindow) updateMainToggleButton() {
 		isRunning = mw.appState.XrayInstance.IsRunning()
 	}
 
-	// 更新按钮图标：运行中使用 CancelIcon，未运行时使用 ConfirmIcon
+	// 更新按钮图标与配色：运行中 CancelIcon + Primary，未运行 ConfirmIcon + Separator
 	if isRunning {
 		mw.mainToggleButton.SetIcon(theme.CancelIcon())
 	} else {
 		mw.mainToggleButton.SetIcon(theme.ConfirmIcon())
 	}
+	mw.mainToggleButton.SetActive(isRunning)
 
 	// 更新按钮尺寸（响应窗口大小变化）
 	buttonSize := mw.calculateButtonSize()
@@ -1115,23 +1159,20 @@ func (mw *MainWindow) GetCurrentSystemProxyMode() SystemProxyMode {
 }
 
 // updateProxyModeButtonsState 更新按钮选中状态
-// 选中按钮使用 MediumImportance（适中的视觉区分，颜色已通过主题加深20%），未选中按钮使用 LowImportance（Mac 简约风格）
+// 选中按钮使用 HighImportance（主色突出，便于区分当前状态），未选中使用 LowImportance
 func (mw *MainWindow) updateProxyModeButtonsState(mode SystemProxyMode) {
 	if mw.proxyModeButtons[0] == nil {
 		return
 	}
 
-	// 重置所有按钮为未选中状态（LowImportance）
 	for i := range mw.proxyModeButtons {
 		mw.proxyModeButtons[i].Importance = widget.LowImportance
 	}
-
-	// 设置选中按钮为中等重要性（颜色已通过主题加深20%）
 	switch mode {
 	case SystemProxyModeClear:
-		mw.proxyModeButtons[0].Importance = widget.MediumImportance
+		mw.proxyModeButtons[0].Importance = widget.HighImportance
 	case SystemProxyModeAuto:
-		mw.proxyModeButtons[1].Importance = widget.MediumImportance
+		mw.proxyModeButtons[1].Importance = widget.HighImportance
 	}
 
 	// 刷新按钮显示

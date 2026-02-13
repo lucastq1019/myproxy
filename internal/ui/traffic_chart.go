@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"image/color"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -133,13 +132,6 @@ func (tc *TrafficChart) updateData() {
 	tc.currentDownload = download
 }
 
-// simulateTraffic 模拟流量数据（用于测试）
-func (tc *TrafficChart) simulateTraffic() int64 {
-	// 简单的模拟：随机生成一些流量值（0-500KB/s）
-	// 实际使用时应该从 xray 实例获取真实数据
-	return int64(rand.Intn(500000))
-}
-
 // Stop 停止更新
 func (tc *TrafficChart) Stop() {
 	if tc.updateTicker != nil {
@@ -240,8 +232,8 @@ func (r *trafficChartRenderer) drawChart(width, height float32) {
 	r.uploadLines = r.uploadLines[:0]
 	r.downloadLines = r.downloadLines[:0]
 
-	uploadColor := CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNamePrimary)
-	downloadColor := CurrentThemeColor(r.trafficChart.appState.App, theme.ColorNameFocus)
+	uploadColor := ChartUploadColor(r.trafficChart.appState.App)
+	downloadColor := ChartDownloadColor(r.trafficChart.appState.App)
 
 	// 绘制上传线（连接所有点）
 	for i := 0; i < len(dataPoints)-1; i++ {

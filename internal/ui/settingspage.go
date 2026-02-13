@@ -3,9 +3,9 @@ package ui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -164,6 +164,15 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[4],
 	)
 	menuBox := container.NewPadded(menuContent)
+	// 极简柔光：浅色模式下侧边栏背景 #F1F5F9，增加物理隔离感
+	var sidebarBg fyne.CanvasObject
+	if sp.appState != nil && sp.appState.App != nil {
+		sidebarBg = canvas.NewRectangle(SidebarBackgroundColor(sp.appState.App))
+	}
+	leftColumn := menuBox
+	if sidebarBg != nil {
+		leftColumn = container.NewStack(sidebarBg, menuBox)
+	}
 
 	// 右侧内容区，使用 Scroll 包裹避免内容撑开窗口
 	sp.contentCard = container.NewMax()
@@ -171,7 +180,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	contentArea := container.NewScroll(container.NewPadded(sp.contentCard))
 
 	// 左右分栏：菜单固定宽度，完整展示菜单项；内容区占剩余空间（分隔不随窗口拖拽变化）
-	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 140}, menuBox, contentArea)
+	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 140}, leftColumn, contentArea)
 
 	sp.content = container.NewBorder(
 		headerBar,
@@ -203,11 +212,11 @@ func (sp *SettingsPage) switchMenu(menu SettingsMenu) {
 	sp.updateMenuState()
 }
 
-// updateMenuState 更新菜单按钮选中样式。
+// updateMenuState 更新菜单按钮选中样式。当前项使用 HighImportance（主色）便于区分。
 func (sp *SettingsPage) updateMenuState() {
 	for i := range sp.menuButtons {
 		if SettingsMenu(i) == sp.currentMenu {
-			sp.menuButtons[i].Importance = widget.MediumImportance
+			sp.menuButtons[i].Importance = widget.HighImportance
 		} else {
 			sp.menuButtons[i].Importance = widget.LowImportance
 		}
@@ -670,9 +679,10 @@ func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 
 	// 将显示文本转换为主题值
 	newTheme := ThemeDark
-	if selectedDisplay == ThemeDisplayLight {
+	switch selectedDisplay {
+	case ThemeDisplayLight:
 		newTheme = ThemeLight
-	} else if selectedDisplay == ThemeDisplaySystem {
+	case ThemeDisplaySystem:
 		newTheme = ThemeSystem
 	}
 
@@ -681,32 +691,9 @@ func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 		_ = sp.appState.SetTheme(newTheme)
 	}
 
-	// 平滑主题切换动画
-	// 使用 fyne.Do 确保在 UI 线程执行
-	w := sp.appState.Window
-	if w != nil {
-		// 首先刷新当前设置页面，让主题选择器立即更新
-		if sp.content != nil {
-			sp.content.Refresh()
-		}
-
-		// 延迟一点时间，然后刷新整个窗口，确保主题变更完全生效
-		go func() {
-			// 短暂延迟，让主题设置有时间生效
-			<-time.After(50 * time.Millisecond)
-
-			fyne.Do(func() {
-				content := w.Canvas().Content()
-				if content != nil {
-					// 重新设置内容以触发完整的主题刷新
-					w.SetContent(content)
-					// 显式刷新画布
-					if c := w.Canvas(); c != nil {
-						c.Refresh(content)
-					}
-				}
-			})
-		}()
+	// 重建当前页面使主题色生效（设置页侧栏/背景等会重新取色）
+	if sp.appState != nil && sp.appState.MainWindow != nil {
+		sp.appState.MainWindow.RebuildCurrentPageForTheme()
 	}
 }
 

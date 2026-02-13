@@ -240,6 +240,7 @@ func NewSubscriptionCard(page *SubscriptionPage, appState *AppState) *Subscripti
 	primaryColor := CurrentThemeColor(appState.App, theme.ColorNamePrimary)
 	card.statusBar = canvas.NewRectangle(primaryColor)
 	card.statusBar.SetMinSize(fyne.NewSize(4, 0))
+	card.statusBar.CornerRadius = 2 // 极简柔光：左侧绿条圆角 2px
 
 	// 微型化图标按钮
 	card.updateBtn = widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), nil)
@@ -290,11 +291,17 @@ func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
 
 func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	card.sub = sub
-	// 使用当前主题色，切换主题后列表刷新时会生效
 	card.statusBar.FillColor = CurrentThemeColor(card.appState.App, theme.ColorNamePrimary)
 	card.statusBar.Refresh()
 	if card.bgRect != nil {
 		card.bgRect.FillColor = CurrentThemeColor(card.appState.App, theme.ColorNameInputBackground)
+		// 极简柔光：浅色模式下 1px 浅色边框取代阴影
+		if !IsDarkTheme(card.appState.App) {
+			card.bgRect.StrokeColor = CurrentThemeColor(card.appState.App, theme.ColorNameSeparator)
+			card.bgRect.StrokeWidth = 1
+		} else {
+			card.bgRect.StrokeWidth = 0
+		}
 		card.bgRect.Refresh()
 	}
 	card.nameLabel.SetText(sub.Label)

@@ -1,19 +1,22 @@
 package ui
 
 import (
+	"image/color"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
-// CircularButton 圆形按钮组件，仅用主题按钮色，不复用、不按重要性区分。
+// CircularButton 圆形按钮组件。极简黑白灰：开启时黑色填充，关闭时边框黑+透明填充。
 type CircularButton struct {
 	widget.BaseWidget
 	icon     fyne.Resource
 	onTapped func()
 	size     float32
 	appState *AppState
+	isActive bool // 是否处于开启状态（代理运行中），用于配色
 }
 
 // NewCircularButton 创建新的圆形按钮
@@ -47,6 +50,15 @@ func (cb *CircularButton) SetSize(size float32) {
 	cb.Refresh()
 }
 
+// SetActive 设置是否处于开启状态（代理运行中），用于切换 Primary / Separator 配色。
+func (cb *CircularButton) SetActive(active bool) {
+	if cb.isActive == active {
+		return
+	}
+	cb.isActive = active
+	cb.Refresh()
+}
+
 // MinSize 返回最小尺寸
 func (cb *CircularButton) MinSize() fyne.Size {
 	return fyne.NewSize(cb.size, cb.size)
@@ -58,9 +70,10 @@ func (cb *CircularButton) CreateRenderer() fyne.WidgetRenderer {
 	if cb.appState != nil {
 		app = cb.appState.App
 	}
-	bgColor := CurrentThemeColor(app, theme.ColorNameButton)
-	circle := canvas.NewCircle(bgColor)
-	circle.StrokeWidth = 0
+	fill, stroke, strokeW := circularButtonStyle(app, cb.isActive)
+	circle := canvas.NewCircle(fill)
+	circle.StrokeColor = stroke
+	circle.StrokeWidth = strokeW
 
 	// 创建图标
 	iconImg := canvas.NewImageFromResource(cb.icon)
@@ -123,9 +136,10 @@ func (r *circularButtonRenderer) Refresh() {
 	if r.button.appState != nil {
 		app = r.button.appState.App
 	}
-	bgColor := CurrentThemeColor(app, theme.ColorNameButton)
-	r.circle.FillColor = bgColor
-	r.circle.StrokeColor = bgColor
+	fill, stroke, strokeW := circularButtonStyle(app, r.button.isActive)
+	r.circle.FillColor = fill
+	r.circle.StrokeColor = stroke
+	r.circle.StrokeWidth = strokeW
 
 	// 更新图标
 	if r.button.icon != nil {
@@ -139,4 +153,13 @@ func (r *circularButtonRenderer) Refresh() {
 // Destroy 销毁渲染器
 func (r *circularButtonRenderer) Destroy() {
 	// 清理资源
+}
+
+// circularButtonStyle 返回 (填充色, 描边色, 描边宽度)。开启=主题主按钮激活色，关闭=背景填充+主色描边。
+func circularButtonStyle(app fyne.App, active bool) (fill, stroke color.Color, strokeWidth float32) {
+	primary := CurrentThemeColor(app, theme.ColorNamePrimary)
+	if active {
+		return MainButtonActiveFill(app), primary, 0
+	}
+	return CurrentThemeColor(app, theme.ColorNameBackground), primary, 2
 }

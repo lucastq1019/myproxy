@@ -607,6 +607,11 @@ func (np *NodePage) StartProxyForSelected() {
 	// 更新状态绑定（使用双向绑定，UI 会自动更新）
 	np.appState.UpdateProxyStatus()
 
+	// 与主界面主开关按钮状态同步
+	if np.appState.MainWindow != nil {
+		np.appState.MainWindow.RefreshMainToggleButton()
+	}
+
 	// 显示成功对话框
 	if np.appState.Window != nil && result.XrayInstance != nil {
 		selectedNode := np.appState.Store.Nodes.GetSelected()
@@ -665,6 +670,11 @@ func (np *NodePage) onStopProxy() {
 
 	// 更新状态绑定
 	np.appState.UpdateProxyStatus()
+
+	// 与主界面主开关按钮状态同步
+	if np.appState.MainWindow != nil {
+		np.appState.MainWindow.RefreshMainToggleButton()
+	}
 
 	// 显示成功对话框
 	if np.appState.Window != nil {
@@ -761,21 +771,55 @@ func (np *NodePage) onTestAll() {
 	}()
 }
 
+// rightAlignLayout 将单个子对象右对齐、垂直居中放置（用于延迟列）。
+type rightAlignLayout struct {
+	minWidth float32
+}
+
+func (r rightAlignLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) != 1 {
+		return
+	}
+	obj := objects[0]
+	min := obj.MinSize()
+	x := size.Width - min.Width
+	if x < 0 {
+		x = 0
+	}
+	y := (size.Height - min.Height) / 2
+	if y < 0 {
+		y = 0
+	}
+	obj.Resize(min)
+	obj.Move(fyne.NewPos(x, y))
+}
+
+func (r rightAlignLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) != 1 {
+		return fyne.NewSize(0, 0)
+	}
+	w := r.minWidth
+	if w < objects[0].MinSize().Width {
+		w = objects[0].MinSize().Width
+	}
+	return fyne.NewSize(w, objects[0].MinSize().Height)
+}
+
 // ServerListItem 自定义服务器列表项（支持右键菜单和多列显示）
 type ServerListItem struct {
 	widget.BaseWidget
 	id          widget.ListItemID
 	panel       *NodePage
 	appState    *AppState
-	renderObj   fyne.CanvasObject // 渲染对象
-	bgRect      *canvas.Rectangle // 背景矩形（用于动态改变颜色）
+	renderObj   fyne.CanvasObject  // 渲染对象
+	bgRect      *canvas.Rectangle  // 背景矩形（用于动态改变颜色）
 	regionLabel *widget.Label
 	nameLabel   *widget.Label
-	delayLabel  *widget.Label
-	statusIcon  *widget.Icon   // 在线/离线状态图标
-	menuButton  *widget.Button // 右侧"..."菜单按钮
-	isSelected  bool           // 是否选中
-	isConnected bool           // 是否当前连接
+	delayText   *canvas.Text       // 延迟列（按 50/150ms 阈值着色）
+	statusIcon  *widget.Icon       // 在线/离线状态图标
+	menuButton  *widget.Button    // 右侧"..."菜单按钮
+	isSelected  bool              // 是否选中
+	isConnected bool              // 是否当前连接
 }
 
 // NewServerListItem 创建新的服务器列表项
@@ -799,8 +843,11 @@ func NewServerListItem(panel *NodePage, appState *AppState) *ServerListItem {
 	item.nameLabel.Wrapping = fyne.TextTruncate
 	item.nameLabel.TextStyle = fyne.TextStyle{Bold: true}
 
-	item.delayLabel = widget.NewLabel("")
-	item.delayLabel.Alignment = fyne.TextAlignTrailing
+	item.delayText = canvas.NewText("", CurrentThemeColor(appState.App, theme.ColorNameForeground))
+	item.delayText.Alignment = fyne.TextAlignTrailing
+	if appState != nil && appState.App != nil {
+		item.delayText.TextSize = theme.DefaultTheme().Size(theme.SizeNameText)
+	}
 
 	// 使用 setupLayout 创建渲染对象（参考 SubscriptionCard 的设计）
 	item.renderObj = item.setupLayout()
@@ -814,12 +861,11 @@ func (s *ServerListItem) setupLayout() fyne.CanvasObject {
 	s.bgRect = canvas.NewRectangle(bgColor)
 	s.bgRect.CornerRadius = 4 // 较小的圆角，适合列表项
 
-	// 使用 GridWithColumns 自动分配列宽：地区（固定比例）+ 名称（自适应）+ 延迟（固定比例）
-	// 减少 padding，使用最小间距
+	delayCell := container.New(&rightAlignLayout{minWidth: 70}, s.delayText)
 	content := container.NewGridWithColumns(3,
-		s.regionLabel, // 地区列（移除 padding，使用最小间距）
-		s.nameLabel,   // 名称列
-		s.delayLabel,  // 延迟列
+		s.regionLabel,
+		s.nameLabel,
+		delayCell,
 	)
 
 	// 使用 Stack 布局：背景 + 内容
@@ -871,19 +917,13 @@ func (s *ServerListItem) Update(server model.Node) {
 				selectedID == server.ID)
 		}
 
-		// 根据选中状态和连接状态更新背景色
+		// 仅按选中/未选中设置背景色，不单独区分连接状态
 		if s.bgRect != nil {
-			if s.isConnected {
-				// 当前连接的节点：使用主题色（蓝色）
-				s.bgRect.FillColor = CurrentThemeColor(s.appState.App, theme.ColorNamePrimary)
-				s.bgRect.StrokeColor = CurrentThemeColor(s.appState.App, theme.ColorNamePrimary)
-				s.bgRect.StrokeWidth = 2
-			} else if s.isSelected {
+			if s.isSelected {
 				s.bgRect.FillColor = CurrentThemeColor(s.appState.App, theme.ColorNameSelection)
 				s.bgRect.StrokeColor = CurrentThemeColor(s.appState.App, theme.ColorNameSeparator)
 				s.bgRect.StrokeWidth = 1
 			} else {
-				// 未选中：使用默认背景色
 				s.bgRect.FillColor = CurrentThemeColor(s.appState.App, theme.ColorNameInputBackground)
 				s.bgRect.StrokeColor = CurrentThemeColor(s.appState.App, theme.ColorNameSeparator)
 				s.bgRect.StrokeWidth = 0
@@ -923,28 +963,16 @@ func (s *ServerListItem) Update(server model.Node) {
 		}
 		s.nameLabel.SetText(prefix + server.Name)
 
-		// 延迟 - 根据延迟值设置重要性（颜色）
-		// 符合 md 设计：< 100ms绿色(🟢)，100-200ms黄色(🟡)，> 200ms红色(🔴)
-		// 空状态处理：显示"测速中..."或"未测速"
-		delayText := "未测速"
+		// 延迟 - 按 0-60ms 绿 / 60-150ms 黄 / >150ms 红 / 超时或未测速 灰 着色
+		delayDisplay := "未测速"
 		if server.Delay > 0 {
-			delayText = fmt.Sprintf("%d ms", server.Delay)
-			// 延迟颜色规则：< 100ms绿色，100-200ms黄色，> 200ms红色
-			if server.Delay < 100 {
-				s.delayLabel.Importance = widget.HighImportance // 绿色
-			} else if server.Delay <= 200 {
-				s.delayLabel.Importance = widget.MediumImportance // 黄色
-			} else {
-				s.delayLabel.Importance = widget.DangerImportance // 红色
-			}
+			delayDisplay = fmt.Sprintf("%d ms", server.Delay)
 		} else if server.Delay < 0 {
-			delayText = "测试失败"
-			s.delayLabel.Importance = widget.DangerImportance
-		} else {
-			delayText = "未测速"
-			s.delayLabel.Importance = widget.LowImportance
+			delayDisplay = "测试失败"
 		}
-		s.delayLabel.SetText(delayText)
+		s.delayText.Text = delayDisplay
+		s.delayText.Color = DelayColor(s.appState.App, server.Delay)
+		s.delayText.Refresh()
 
 		// 更新在线/离线状态图标
 		if s.statusIcon != nil {
