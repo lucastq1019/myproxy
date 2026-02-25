@@ -11,16 +11,19 @@ import (
 type ProxyService struct {
 	systemProxy  *systemproxy.SystemProxy
 	xrayInstance *xray.XrayInstance
+	configService *ConfigService
 }
 
 // NewProxyService 创建新的代理服务实例。
 // 参数：
 //   - xrayInstance: Xray 实例，用于获取代理端口
+//   - configService: 配置服务实例，用于获取代理类型配置
 //
 // 返回：初始化后的 ProxyService 实例
-func NewProxyService(xrayInstance *xray.XrayInstance) *ProxyService {
+func NewProxyService(xrayInstance *xray.XrayInstance, configService *ConfigService) *ProxyService {
 	ps := &ProxyService{
 		xrayInstance: xrayInstance,
+		configService: configService,
 	}
 	ps.updateSystemProxyPort()
 	return ps
@@ -97,7 +100,12 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 	case "terminal":
 		_ = ps.systemProxy.ClearSystemProxy()
 		_ = ps.systemProxy.ClearTerminalProxy()
-		err = ps.systemProxy.SetTerminalProxy()
+		// 获取代理类型
+		proxyType := "socks5"
+		if ps.configService != nil {
+			proxyType = ps.configService.GetProxyType()
+		}
+		err = ps.systemProxy.SetTerminalProxy(proxyType)
 		if err == nil {
 			proxyPort := 10808
 			if ps.xrayInstance != nil && ps.xrayInstance.IsRunning() {

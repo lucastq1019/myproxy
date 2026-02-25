@@ -93,8 +93,11 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 
 // SetTerminalProxy 设置终端代理（环境变量代理）
 // Windows 可以通过设置用户环境变量实现持久化
-func (p *WindowsProxy) SetTerminalProxy(host string, port int) error {
-	proxyURL := fmt.Sprintf("socks5://%s:%d", host, port)
+func (p *WindowsProxy) SetTerminalProxy(host string, port int, proxyType string) error {
+	if proxyType == "" {
+		proxyType = "socks5"
+	}
+	proxyURL := fmt.Sprintf("%s://%s:%d", proxyType, host, port)
 
 	// 1. 设置当前进程环境变量（立即生效）
 	os.Setenv("HTTP_PROXY", proxyURL)

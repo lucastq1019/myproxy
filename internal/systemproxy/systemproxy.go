@@ -41,8 +41,8 @@ func (sp *SystemProxy) SetSystemProxy() error {
 }
 
 // SetTerminalProxy 设置终端代理（环境变量代理）
-func (sp *SystemProxy) SetTerminalProxy() error {
-	return sp.platform.SetTerminalProxy(sp.proxyHost, sp.proxyPort)
+func (sp *SystemProxy) SetTerminalProxy(proxyType string) error {
+	return sp.platform.SetTerminalProxy(sp.proxyHost, sp.proxyPort, proxyType)
 }
 
 // ClearTerminalProxy 清除终端代理设置

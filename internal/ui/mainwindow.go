@@ -842,7 +842,7 @@ func (mw *MainWindow) startProxy() {
 		mw.appState.ProxyService.UpdateXrayInstance(result.XrayInstance)
 	} else {
 		// 延迟初始化 ProxyService
-		mw.appState.ProxyService = service.NewProxyService(result.XrayInstance)
+		mw.appState.ProxyService = service.NewProxyService(result.XrayInstance, mw.appState.ConfigService)
 	}
 
 	// 记录日志（统一日志记录）
@@ -1080,7 +1080,12 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 		if err == nil {
 			logMessage = fmt.Sprintf("已自动配置系统代理: 127.0.0.1:%d", proxyPort)
 			if shouldSetTerminal {
-				terminalErr := mw.systemProxy.SetTerminalProxy()
+				// 获取代理类型
+				proxyType := "socks5"
+				if mw.appState != nil && mw.appState.ConfigService != nil {
+					proxyType = mw.appState.ConfigService.GetProxyType()
+				}
+				terminalErr := mw.systemProxy.SetTerminalProxy(proxyType)
 				if terminalErr == nil {
 					logMessage += "；已设置环境变量代理"
 				} else {

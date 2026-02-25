@@ -40,12 +40,15 @@ func (sps *SystemProxyService) SetSystemProxy() error {
 }
 
 // SetTerminalProxy 设置终端代理（环境变量代理）。
+// 参数：
+//   - proxyType: 代理类型（https 或 socks5）
+//
 // 返回：错误（如果有）
-func (sps *SystemProxyService) SetTerminalProxy() error {
+func (sps *SystemProxyService) SetTerminalProxy(proxyType string) error {
 	if sps.proxy == nil {
 		return nil
 	}
-	return sps.proxy.SetTerminalProxy()
+	return sps.proxy.SetTerminalProxy(proxyType)
 }
 
 // ClearTerminalProxy 清除终端代理设置。
@@ -81,9 +84,10 @@ func (sps *SystemProxyService) UpdateProxy(host string, port int) {
 // ApplyProxyMode 应用指定的代理模式。
 // 参数：
 //   - mode: 代理模式字符串（clear/auto/terminal）
+//   - proxyType: 代理类型（https 或 socks5），仅用于terminal模式
 //
 // 返回：错误（如果有）
-func (sps *SystemProxyService) ApplyProxyMode(mode string) error {
+func (sps *SystemProxyService) ApplyProxyMode(mode string, proxyType string) error {
 	if sps.proxy == nil {
 		return nil
 	}
@@ -94,7 +98,7 @@ func (sps *SystemProxyService) ApplyProxyMode(mode string) error {
 	case "auto":
 		return sps.SetSystemProxy()
 	case "terminal":
-		return sps.SetTerminalProxy()
+		return sps.SetTerminalProxy(proxyType)
 	default:
 		return sps.ClearSystemProxy() // 默认清除代理
 	}
