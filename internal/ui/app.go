@@ -62,7 +62,7 @@ func NewAppState() *AppState {
 		ProxyStatusBinding:  dataStore.ProxyStatus.ProxyStatusBinding,
 		PortBinding:         dataStore.ProxyStatus.PortBinding,
 		ServerNameBinding:   dataStore.ProxyStatus.ServerNameBinding,
-		ProxyService:         service.NewProxyService(nil),
+		ProxyService:         service.NewProxyService(nil, configService),
 		XrayControlService:   service.NewXrayControlService(dataStore, configService, nil, nil),
 		AccessRecordService:  service.NewAccessRecordService(dataStore),
 	}

@@ -592,7 +592,7 @@ func (np *NodePage) StartProxyForSelected() {
 		np.appState.ProxyService.UpdateXrayInstance(result.XrayInstance)
 	} else {
 		// 延迟初始化 ProxyService
-		np.appState.ProxyService = service.NewProxyService(result.XrayInstance)
+		np.appState.ProxyService = service.NewProxyService(result.XrayInstance, np.appState.ConfigService)
 	}
 
 	// 记录日志（统一日志记录）

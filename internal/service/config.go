@@ -292,6 +292,28 @@ func (cs *ConfigService) SetTerminalProxyEnabled(enabled bool) error {
 	return cs.store.AppConfig.Set("terminalProxyEnabled", val)
 }
 
+// GetProxyType 获取代理类型配置。
+// 返回：代理类型（https 或 socks5）
+func (cs *ConfigService) GetProxyType() string {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return "socks5" // 默认使用 socks5
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("proxyType", "socks5")
+	return v
+}
+
+// SetProxyType 设置代理类型配置。
+// 参数：
+//   - proxyType: 代理类型（https 或 socks5）
+//
+// 返回：错误（如果有）
+func (cs *ConfigService) SetProxyType(proxyType string) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	return cs.store.AppConfig.Set("proxyType", proxyType)
+}
+
 // parseDirectRoutes 从换行分隔的字符串解析直连路由列表。
 // 支持 domain:xxx、ip 或 cidr，纯域名会补全为 domain:xxx。
 func parseDirectRoutes(raw string) []string {

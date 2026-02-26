@@ -12,7 +12,7 @@ type PlatformProxy interface {
 	// SetSystemProxy 设置系统代理
 	SetSystemProxy(host string, port int) error
 	// SetTerminalProxy 设置终端代理（环境变量）
-	SetTerminalProxy(host string, port int) error
+	SetTerminalProxy(host string, port int, proxyType string) error
 	// ClearTerminalProxy 清除终端代理
 	ClearTerminalProxy() error
 	// GetCurrentProxyMode 获取当前代理模式
@@ -50,7 +50,7 @@ func (p *UnsupportedProxy) SetSystemProxy(host string, port int) error {
 	return fmt.Errorf("不支持的操作系统: %s", p.os)
 }
 
-func (p *UnsupportedProxy) SetTerminalProxy(host string, port int) error {
+func (p *UnsupportedProxy) SetTerminalProxy(host string, port int, proxyType string) error {
 	return fmt.Errorf("不支持的操作系统: %s", p.os)
 }
 

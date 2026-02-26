@@ -353,9 +353,25 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		terminalProxyCheck.SetChecked(sp.appState.ConfigService.GetTerminalProxyEnabled())
 	}
 
+	// 代理类型选择
+	proxyTypeOptions := []string{"socks5", "https"}
+	proxyTypeSelect := widget.NewSelect(proxyTypeOptions, func(s string) {
+		if sp.appState != nil && sp.appState.ConfigService != nil {
+			_ = sp.appState.ConfigService.SetProxyType(s)
+		}
+	})
+	if sp.appState != nil && sp.appState.ConfigService != nil {
+		proxyTypeSelect.SetSelected(sp.appState.ConfigService.GetProxyType())
+	}
+	proxyTypeLabel := widget.NewLabel("代理类型")
+
 	// 代理配置区域：包含"终端代理"标题、"不走直连"、"重置"按钮
 	proxyConfigArea := container.NewVBox(
 		terminalProxyCheck,
+		container.NewVBox(
+			proxyTypeLabel,
+			proxyTypeSelect,
+		),
 		widget.NewSeparator(),
 		container.NewHBox(sp.routeUseProxy, resetBtn, layout.NewSpacer()),
 	)
@@ -365,7 +381,7 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	// 使用 Border 布局：顶部固定代理配置区域，中间路由列表占满剩余空间，底部固定添加路由区域
 	return container.NewBorder(
 		container.NewVBox(proxyConfigArea, routesLabel), // 顶部：代理配置区域 + "路由列表"标签
-		addArea,                                        // 底部：添加路由输入框
+		addArea, // 底部：添加路由输入框
 		nil, nil,
 		listScroll, // 中间：路由列表占满剩余空间
 	)
