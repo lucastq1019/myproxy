@@ -17,15 +17,20 @@ jobs:
           go-version: '1.25' # 根据你的项目调整版本
 
       # 使用 fyne-cross 进行交叉编译
+      # 使用 fyne-cross 进行交叉编译，添加 -app-id 参数
       - name: 编译多平台二进制文件
         run: |
           go install github.com/fyne-io/fyne-cross@latest
-          # 编译 Windows (amd64)
-          fyne-cross windows -arch=amd64
-          # 编译 Linux (amd64)
-          fyne-cross linux -arch=amd64
-          # 编译 macOS (darwin amd64)，如需支持 M1/M2 可增加 -arch=arm64
-          fyne-cross darwin -arch=amd64
+          
+          # 注意：把 com.yourname.myproxy 换成你自己的标识
+          # 编译 Windows
+          fyne-cross windows -arch=amd64 -app-id com.lucastq.myproxy
+          
+          # 编译 Linux
+          fyne-cross linux -arch=amd64 -app-id com.lucastq.myproxy
+          
+          # 编译 macOS
+          fyne-cross darwin -arch=amd64 -app-id com.lucastq.myproxy
 
       # 自动创建 GitHub Release 并上传文件
       - name: 发布到 Release
