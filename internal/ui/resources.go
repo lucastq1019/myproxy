@@ -36,6 +36,14 @@ func getIconDir() string {
 	return filepath.Join(execDir, "assets")
 }
 
+// ClearIconCaches 清除图标缓存，主题切换后调用以便重新生成对应主题的图标。
+func ClearIconCaches() {
+	iconCacheMutex.Lock()
+	defer iconCacheMutex.Unlock()
+	trayIconCache = nil
+	appIconCache = nil
+}
+
 // createAppIcon 创建应用图标资源（用于窗口图标，228x228）
 // 参数：
 //   - appState: 应用状态（用于获取主题配置）

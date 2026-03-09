@@ -382,6 +382,17 @@ func (a *AppState) SetTheme(themeStr string) error {
 		a.App.Settings().SetTheme(NewMonochromeTheme(variant))
 	}
 
+	// 使主窗口与托盘图标跟随主题：清除缓存并重新生成
+	ClearIconCaches()
+	if a.App != nil {
+		if icon := createAppIcon(a); icon != nil {
+			a.App.SetIcon(icon)
+		}
+	}
+	if a.TrayManager != nil {
+		a.TrayManager.RefreshTrayIcon()
+	}
+
 	return nil
 }
 

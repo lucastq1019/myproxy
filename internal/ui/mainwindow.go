@@ -747,7 +747,8 @@ func (mw *MainWindow) ShowSubscriptionPage() {
 	mw.navigateToPage(PageTypeSubscription, true)
 }
 
-// RebuildCurrentPageForTheme 主题切换后重建当前页面，使侧栏/背景等缓存的主题色生效。
+// RebuildCurrentPageForTheme 主题切换后重建当前页面，使侧栏/背景等缓存的主题色生效；
+// 同时使主页 logo 随主题更新（未在当前页时清空 homePage 缓存，下次进入主页时用 createHomeLogo 重新生成）。
 func (mw *MainWindow) RebuildCurrentPageForTheme() {
 	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
 		return
@@ -758,11 +759,12 @@ func (mw *MainWindow) RebuildCurrentPageForTheme() {
 			mw.settingsPage = mw.settingsPageInstance.Build()
 			mw.appState.Window.SetContent(wrapPageWithBackground(mw.settingsPage, mw.appState.App))
 		}
+		mw.homePage = nil
 	case PageTypeHome:
 		mw.homePage = mw.buildHomePage()
 		mw.appState.Window.SetContent(wrapPageWithBackground(mw.homePage, mw.appState.App))
 	default:
-		// 其他页面仅刷新根内容，依赖各组件 Refresh 重读主题
+		mw.homePage = nil
 		if c := mw.appState.Window.Canvas().Content(); c != nil {
 			c.Refresh()
 		}

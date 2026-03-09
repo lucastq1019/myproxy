@@ -49,6 +49,19 @@ func (tm *TrayManager) SetupTray() {
 	}
 }
 
+// RefreshTrayIcon 根据当前主题刷新托盘图标（主题切换后调用）。
+func (tm *TrayManager) RefreshTrayIcon() {
+	if tm.appState == nil {
+		return
+	}
+	if desk, ok := tm.app.(desktop.App); ok {
+		icon := createTrayIconResource(tm.appState)
+		if icon != nil {
+			desk.SetSystemTrayIcon(icon)
+		}
+	}
+}
+
 // createTrayMenu 创建托盘菜单
 func (tm *TrayManager) createTrayMenu(desk desktop.App) {
 	// 创建系统代理模式菜单项（如果尚未创建）

@@ -688,6 +688,8 @@ func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 }
 
 // onThemeChanged 主题变更回调。
+// 仅在实际主题发生变化时执行 SetTheme 与重建，避免 buildAppearanceContent 中
+// SetSelected 触发回调导致 RebuildCurrentPageForTheme -> Build -> buildAppearanceContent -> SetSelected 死循环。
 func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 	if sp.appState == nil || sp.appState.App == nil {
 		return
@@ -702,13 +704,15 @@ func (sp *SettingsPage) onThemeChanged(selectedDisplay string) {
 		newTheme = ThemeSystem
 	}
 
-	// 保存并应用主题配置
-	if sp.appState != nil {
-		_ = sp.appState.SetTheme(newTheme)
+	if sp.appState.GetTheme() == newTheme {
+		return
 	}
 
+	// 保存并应用主题配置
+	_ = sp.appState.SetTheme(newTheme)
+
 	// 重建当前页面使主题色生效（设置页侧栏/背景等会重新取色）
-	if sp.appState != nil && sp.appState.MainWindow != nil {
+	if sp.appState.MainWindow != nil {
 		sp.appState.MainWindow.RebuildCurrentPageForTheme()
 	}
 }
