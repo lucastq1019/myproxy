@@ -206,6 +206,95 @@ func (cs *ConfigService) Set(key, value string) error {
 	return cs.store.AppConfig.Set(key, value)
 }
 
+// GetDebugPprofEnabled 获取 pprof 开关。
+func (cs *ConfigService) GetDebugPprofEnabled() bool {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return false
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("debugPprofEnabled", "false")
+	return v == "true"
+}
+
+// SetDebugPprofEnabled 设置 pprof 开关。
+func (cs *ConfigService) SetDebugPprofEnabled(enabled bool) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	return cs.store.AppConfig.Set("debugPprofEnabled", value)
+}
+
+// GetDebugPprofAddr 获取 pprof 地址。
+func (cs *ConfigService) GetDebugPprofAddr() string {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return "127.0.0.1:6060"
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("debugPprofAddr", "127.0.0.1:6060")
+	if strings.TrimSpace(v) == "" {
+		return "127.0.0.1:6060"
+	}
+	return v
+}
+
+// SetDebugPprofAddr 设置 pprof 地址。
+func (cs *ConfigService) SetDebugPprofAddr(addr string) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		addr = "127.0.0.1:6060"
+	}
+	return cs.store.AppConfig.Set("debugPprofAddr", addr)
+}
+
+// GetDiagnosticsSamplingSeconds 获取诊断采样周期（秒）。
+func (cs *ConfigService) GetDiagnosticsSamplingSeconds() int {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return defaultDiagnosticsSampleSecs
+	}
+	raw, _ := cs.store.AppConfig.GetWithDefault("diagnosticsSamplingSeconds", fmt.Sprintf("%d", defaultDiagnosticsSampleSecs))
+	switch strings.TrimSpace(raw) {
+	case "1":
+		return 1
+	case "10":
+		return 10
+	default:
+		return 5
+	}
+}
+
+// SetDiagnosticsSamplingSeconds 设置诊断采样周期（秒）。
+func (cs *ConfigService) SetDiagnosticsSamplingSeconds(seconds int) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	if seconds != 1 && seconds != 5 && seconds != 10 {
+		seconds = defaultDiagnosticsSampleSecs
+	}
+	return cs.store.AppConfig.Set("diagnosticsSamplingSeconds", fmt.Sprintf("%d", seconds))
+}
+
+// GetDiagnosticsDir 获取诊断目录。
+func (cs *ConfigService) GetDiagnosticsDir() string {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return ""
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("diagnosticsDir", "")
+	return strings.TrimSpace(v)
+}
+
+// SetDiagnosticsDir 设置诊断目录。
+func (cs *ConfigService) SetDiagnosticsDir(dir string) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	return cs.store.AppConfig.Set("diagnosticsDir", strings.TrimSpace(dir))
+}
+
 // GetDirectRoutes 获取直连路由列表（域名或 IP/CIDR，每行一条，对应 xray 规则）。
 // 返回：直连地址列表，空切片表示未配置
 func (cs *ConfigService) GetDirectRoutes() []string {

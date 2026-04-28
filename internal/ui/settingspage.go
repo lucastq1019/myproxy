@@ -22,6 +22,7 @@ const (
 	SettingsMenuDirectRoute
 	SettingsMenuLog
 	SettingsMenuAccessRecord
+	SettingsMenuDiagnostics
 	SettingsMenuAbout
 )
 
@@ -51,6 +52,8 @@ func (m SettingsMenu) String() string {
 		return "日志"
 	case SettingsMenuAccessRecord:
 		return "访问记录"
+	case SettingsMenuDiagnostics:
+		return "诊断"
 	case SettingsMenuAbout:
 		return "关于"
 	default:
@@ -100,7 +103,7 @@ func (f fixedMenuContentLayout) Layout(objects []fyne.CanvasObject, size fyne.Si
 type SettingsPage struct {
 	appState    *AppState
 	content     fyne.CanvasObject
-	menuButtons [5]*widget.Button
+	menuButtons [6]*widget.Button
 	contentCard *fyne.Container
 	currentMenu SettingsMenu
 
@@ -112,6 +115,9 @@ type SettingsPage struct {
 
 	// 日志：在设置页「日志」菜单中复用，用于查看日志
 	logsPanel *LogsPanel
+
+	// 诊断页
+	diagnosticsPage *DiagnosticsPage
 
 	// 访问记录相关
 	accessRecordsList *widget.List
@@ -149,7 +155,8 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	sp.menuButtons[1] = widget.NewButton("代理配置", func() { sp.switchMenu(SettingsMenuDirectRoute) })
 	sp.menuButtons[2] = widget.NewButton("日志", func() { sp.switchMenu(SettingsMenuLog) })
 	sp.menuButtons[3] = widget.NewButton("访问记录", func() { sp.switchMenu(SettingsMenuAccessRecord) })
-	sp.menuButtons[4] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
+	sp.menuButtons[4] = widget.NewButton("诊断", func() { sp.switchMenu(SettingsMenuDiagnostics) })
+	sp.menuButtons[5] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
 
 	for i := range sp.menuButtons {
 		sp.menuButtons[i].Importance = widget.LowImportance
@@ -162,6 +169,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[2],
 		sp.menuButtons[3],
 		sp.menuButtons[4],
+		sp.menuButtons[5],
 	)
 	menuBox := container.NewPadded(menuContent)
 	// 极简柔光：浅色模式下侧边栏背景 #F1F5F9，增加物理隔离感
@@ -205,6 +213,8 @@ func (sp *SettingsPage) switchMenu(menu SettingsMenu) {
 		sp.contentCard.Add(sp.buildLogContent())
 	case SettingsMenuAccessRecord:
 		sp.contentCard.Add(sp.buildAccessRecordContent())
+	case SettingsMenuDiagnostics:
+		sp.contentCard.Add(sp.buildDiagnosticsContent())
 	case SettingsMenuAbout:
 		sp.contentCard.Add(sp.buildAboutContent())
 	}
@@ -559,6 +569,21 @@ func (sp *SettingsPage) buildLogContent() fyne.CanvasObject {
 		sp.logsPanel = NewLogsPanel(sp.appState)
 	}
 	return sp.logsPanel.Build()
+}
+
+func (sp *SettingsPage) buildDiagnosticsContent() fyne.CanvasObject {
+	if sp.diagnosticsPage == nil {
+		sp.diagnosticsPage = NewDiagnosticsPage(sp.appState)
+	}
+	return sp.diagnosticsPage.Build()
+}
+
+// Cleanup 释放设置页资源。
+func (sp *SettingsPage) Cleanup() {
+	if sp.diagnosticsPage != nil {
+		sp.diagnosticsPage.Cleanup()
+		sp.diagnosticsPage = nil
+	}
 }
 
 // buildAccessRecordContent 构建设置「访问记录」内容区，展示访问的网站及累计访问次数。

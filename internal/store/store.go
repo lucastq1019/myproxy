@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/data/binding"
@@ -16,13 +17,13 @@ import (
 )
 
 type Store struct {
-	initialized     bool
-	Nodes           *NodesStore
-	Subscriptions   *SubscriptionsStore
-	Layout          *LayoutStore
-	AppConfig       *AppConfigStore
-	ProxyStatus     *ProxyStatusStore
-	AccessRecords   *AccessRecordsStore
+	initialized   bool
+	Nodes         *NodesStore
+	Subscriptions *SubscriptionsStore
+	Layout        *LayoutStore
+	AppConfig     *AppConfigStore
+	ProxyStatus   *ProxyStatusStore
+	AccessRecords *AccessRecordsStore
 }
 
 func NewStore(subscriptionManager *subscription.SubscriptionManager) *Store {
@@ -163,7 +164,10 @@ func (s *Store) SelectServer(id string) error {
 	if err := s.Nodes.Select(id); err != nil {
 		return err
 	}
-	return s.AppConfig.Set("selectedServerID", id)
+	if err := s.AppConfig.Set("selectedServerID", id); err != nil {
+		return err
+	}
+	return s.AppConfig.Set("lastNodeSwitchAt", time.Now().Format(time.RFC3339))
 }
 
 func (ns *NodesStore) UpdateDelay(id string, delay int) error {
@@ -350,6 +354,9 @@ func (ss *SubscriptionsStore) UpdateByID(id int64) error {
 			return fmt.Errorf("订阅存储: 刷新节点数据失败: %w", err)
 		}
 	}
+	if ss.parentStore != nil && ss.parentStore.AppConfig != nil {
+		_ = ss.parentStore.AppConfig.Set("lastSubscriptionUpdateAt", time.Now().Format(time.RFC3339))
+	}
 
 	return nil
 }
@@ -372,6 +379,9 @@ func (ss *SubscriptionsStore) Fetch(url string, label ...string) error {
 		if err := ss.parentStore.Nodes.Load(); err != nil {
 			return fmt.Errorf("订阅存储: 刷新节点数据失败: %w", err)
 		}
+	}
+	if ss.parentStore != nil && ss.parentStore.AppConfig != nil {
+		_ = ss.parentStore.AppConfig.Set("lastSubscriptionUpdateAt", time.Now().Format(time.RFC3339))
 	}
 
 	return nil

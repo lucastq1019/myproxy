@@ -413,6 +413,19 @@ func (mw *MainWindow) Cleanup() {
 	// 停止流量图更新
 	if mw.trafficChart != nil {
 		mw.trafficChart.Stop()
+		mw.trafficChart = nil
+	}
+	if mw.nodePageInstance != nil {
+		mw.nodePageInstance.Cleanup()
+		mw.nodePageInstance = nil
+	}
+	if mw.subscriptionPageInstance != nil {
+		mw.subscriptionPageInstance.Cleanup()
+		mw.subscriptionPageInstance = nil
+	}
+	if mw.settingsPageInstance != nil {
+		mw.settingsPageInstance.Cleanup()
+		mw.settingsPageInstance = nil
 	}
 }
 

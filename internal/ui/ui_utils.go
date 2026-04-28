@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -29,4 +30,8 @@ func NewTitleLabel(text string) *widget.Label {
 
 func NewSeparator() *widget.Separator {
 	return widget.NewSeparator()
+}
+
+func newPaddedWithSize(content fyne.CanvasObject, _ float32) fyne.CanvasObject {
+	return container.NewPadded(content)
 }
