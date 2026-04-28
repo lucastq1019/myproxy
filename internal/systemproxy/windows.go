@@ -6,6 +6,8 @@ package systemproxy
 import (
 	"fmt"
 	"os"
+	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
 )
@@ -15,6 +17,21 @@ type WindowsProxy struct {
 	proxyHost string
 	proxyPort int
 }
+
+var (
+	wininetDLL             = syscall.NewLazyDLL("wininet.dll")
+	user32DLL              = syscall.NewLazyDLL("user32.dll")
+	procInternetSetOptionW = wininetDLL.NewProc("InternetSetOptionW")
+	procSendMessageTimeout = user32DLL.NewProc("SendMessageTimeoutW")
+)
+
+const (
+	internetOptionSettingsChanged = 39
+	internetOptionRefresh         = 37
+	hwndBroadcast                 = 0xffff
+	wmSettingChange               = 0x001A
+	smtoAbortIfHung               = 0x0002
+)
 
 func newWindowsProxy(host string, port int) *WindowsProxy {
 	return &WindowsProxy{
@@ -44,11 +61,7 @@ func (p *WindowsProxy) ClearSystemProxy() error {
 	// 清除代理服务器地址（可选，保留原值也可以）
 	// key.DeleteValue("ProxyServer")
 
-	// 通知系统设置已更改（需要发送 WM_SETTINGCHANGE 消息）
-	// 在 Go 中可以通过调用 Windows API 实现，但这里简化处理
-	// 用户可能需要刷新网络设置或重启浏览器
-
-	return nil
+	return notifyWindowsProxyChanged()
 }
 
 // SetSystemProxy 设置 Windows 系统代理
@@ -84,11 +97,7 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 		_ = err
 	}
 
-	// 注意：修改注册表后，需要通知系统设置已更改
-	// 在 Go 中可以通过调用 Windows API 发送 WM_SETTINGCHANGE 消息
-	// 但这里简化处理，用户可能需要刷新网络设置或重启浏览器
-
-	return nil
+	return notifyWindowsProxyChanged()
 }
 
 // SetTerminalProxy 设置终端代理（环境变量代理）
@@ -128,11 +137,7 @@ func (p *WindowsProxy) SetTerminalProxy(host string, port int, proxyType string)
 	_ = envKey.SetStringValue("ALL_PROXY", proxyURL)
 	_ = envKey.SetStringValue("all_proxy", proxyURL)
 
-	// 注意：修改用户环境变量后，需要广播 WM_SETTINGCHANGE 消息
-	// 新打开的终端/程序会自动读取新的环境变量
-	// 当前已打开的终端需要重新加载环境变量
-
-	return nil
+	return notifyWindowsEnvironmentChanged()
 }
 
 // ClearTerminalProxy 清除终端代理设置
@@ -165,12 +170,76 @@ func (p *WindowsProxy) ClearTerminalProxy() error {
 	_ = envKey.DeleteValue("ALL_PROXY")
 	_ = envKey.DeleteValue("all_proxy")
 
-	return nil
+	return notifyWindowsEnvironmentChanged()
 }
 
 func (p *WindowsProxy) GetCurrentProxyMode() ProxyMode {
+	key, err := registry.OpenKey(
+		registry.CURRENT_USER,
+		`Software\Microsoft\Windows\CurrentVersion\Internet Settings`,
+		registry.QUERY_VALUE,
+	)
+	if err == nil {
+		defer key.Close()
+		if enabled, _, err := key.GetIntegerValue("ProxyEnable"); err == nil && enabled != 0 {
+			if proxyServer, _, err := key.GetStringValue("ProxyServer"); err == nil && proxyServer != "" {
+				return ProxyModeAuto
+			}
+		}
+	}
 	if os.Getenv("HTTP_PROXY") != "" || os.Getenv("http_proxy") != "" {
 		return ProxyModeTerminal
 	}
 	return ProxyModeNone
+}
+
+func notifyWindowsProxyChanged() error {
+	if err := internetSetOption(internetOptionSettingsChanged); err != nil {
+		return err
+	}
+	if err := internetSetOption(internetOptionRefresh); err != nil {
+		return err
+	}
+	if err := broadcastSettingChange("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func notifyWindowsEnvironmentChanged() error {
+	return broadcastSettingChange("Environment")
+}
+
+func internetSetOption(option uintptr) error {
+	ret, _, callErr := procInternetSetOptionW.Call(0, option, 0, 0)
+	if ret == 0 {
+		if callErr != syscall.Errno(0) {
+			return fmt.Errorf("刷新 Windows 代理设置失败: %v", callErr)
+		}
+		return fmt.Errorf("刷新 Windows 代理设置失败")
+	}
+	return nil
+}
+
+func broadcastSettingChange(target string) error {
+	targetPtr, err := syscall.UTF16PtrFromString(target)
+	if err != nil {
+		return fmt.Errorf("编码 Windows 设置变更消息失败: %w", err)
+	}
+	ret, _, callErr := procSendMessageTimeout.Call(
+		uintptr(hwndBroadcast),
+		uintptr(wmSettingChange),
+		0,
+		uintptr(unsafe.Pointer(targetPtr)),
+		uintptr(smtoAbortIfHung),
+		uintptr(5000),
+		0,
+	)
+	if ret == 0 {
+		if callErr != syscall.Errno(0) {
+			return fmt.Errorf("广播 Windows 设置变更失败: %v", callErr)
+		}
+		return fmt.Errorf("广播 Windows 设置变更失败")
+	}
+	return nil
 }

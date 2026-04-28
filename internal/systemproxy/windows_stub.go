@@ -26,7 +26,7 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 	return fmt.Errorf("windows 系统代理功能仅在 Windows 平台可用")
 }
 
-func (p *WindowsProxy) SetTerminalProxy(host string, port int) error {
+func (p *WindowsProxy) SetTerminalProxy(host string, port int, proxyType string) error {
 	return fmt.Errorf("windows 终端代理功能仅在 Windows 平台可用")
 }
 
