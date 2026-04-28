@@ -69,7 +69,6 @@ func (dp *DiagnosticsPage) Build() fyne.CanvasObject {
 		}
 		dp.Refresh()
 	})
-	dp.pprofCheck.SetChecked(pprofEnabled)
 
 	dp.pprofAddr = widget.NewEntry()
 	dp.pprofAddr.SetText(pprofAddr)
@@ -104,10 +103,11 @@ func (dp *DiagnosticsPage) Build() fyne.CanvasObject {
 		_ = dp.appState.ConfigService.SetDiagnosticsSamplingSeconds(seconds)
 		dp.setExportStatus("采样周期已保存，重启应用后完全生效")
 	})
-	dp.samplingSel.SetSelected(samplingSeconds)
 
 	dp.memChart = NewMetricChart(dp.appState, "内存趋势", ChartUploadColor(dp.appState.App))
 	dp.gorChart = NewMetricChart(dp.appState, "Goroutine 趋势", ChartDownloadColor(dp.appState.App))
+	dp.pprofCheck.SetChecked(pprofEnabled)
+	dp.samplingSel.SetSelected(samplingSeconds)
 
 	buttonsRow1 := container.NewGridWithColumns(2,
 		widget.NewButtonWithIcon("导出堆快照", theme.DownloadIcon(), func() {
@@ -256,6 +256,10 @@ func (dp *DiagnosticsPage) startAutoRefresh() {
 }
 
 func (dp *DiagnosticsPage) refreshCharts(history []model.DiagnosticSnapshot) {
+	if dp == nil || dp.memChart == nil || dp.gorChart == nil || dp.appState == nil || dp.appState.DiagnosticsService == nil {
+		return
+	}
+
 	memSeries := make([]float64, 0, len(history))
 	gorSeries := make([]float64, 0, len(history))
 	for _, item := range history {

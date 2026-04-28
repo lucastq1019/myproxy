@@ -188,7 +188,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	contentArea := container.NewScroll(container.NewPadded(sp.contentCard))
 
 	// 左右分栏：菜单固定宽度，完整展示菜单项；内容区占剩余空间（分隔不随窗口拖拽变化）
-	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 140}, leftColumn, contentArea)
+	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 98}, leftColumn, contentArea)
 
 	sp.content = container.NewBorder(
 		headerBar,
@@ -594,11 +594,14 @@ func (sp *SettingsPage) buildAccessRecordContent() fyne.CanvasObject {
 		func() int { return len(sp.accessRecordsData) },
 		func() fyne.CanvasObject {
 			addrLabel := widget.NewLabel("")
-			addrLabel.Wrapping = fyne.TextWrapWord // 宽度过宽时自动换行
+			addrLabel.Wrapping = fyne.TextWrapOff
+			addrLabel.Truncation = fyne.TextTruncateEllipsis
 			countLabel := widget.NewLabel("")
-			return container.NewVBox(
+			countLabel.Alignment = fyne.TextAlignTrailing
+			return container.NewBorder(
+				nil, nil, nil,
+				countLabel,
 				addrLabel,
-				container.NewHBox(layout.NewSpacer(), countLabel),
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -694,20 +697,24 @@ func collectLabelsFromObject(obj fyne.CanvasObject) []*widget.Label {
 func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 	titleLabel := widget.NewLabelWithStyle("关于", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
-	versionLabel := widget.NewLabel("myproxy  版本 1.0.0")
-	versionLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
+	versionLabel := widget.NewLabel("myproxy")
+	versionLabel.Wrapping = fyne.TextWrapWord
 
-	descLabel := widget.NewLabel("轻量级代理管理工具，基于 Xray-core 与 Fyne")
-	descLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
+	descLabel := widget.NewLabel("基于 Xray-core 与 Fyne 的桌面代理管理工具。")
+	descLabel.Wrapping = fyne.TextWrapWord
 
-	emailLabel := widget.NewLabel("邮箱: lucastq1019@gmail.com")
-	emailLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
+	featureLabel := widget.NewLabel("提供节点切换、订阅管理、系统代理、访问记录与运行诊断等功能。")
+	featureLabel.Wrapping = fyne.TextWrapWord
+
+	emailLabel := widget.NewLabel("联系邮箱: lucastq1019@gmail.com")
+	emailLabel.Wrapping = fyne.TextWrapWord
 
 	return container.NewVBox(
 		titleLabel,
 		widget.NewSeparator(),
 		versionLabel,
 		descLabel,
+		featureLabel,
 		emailLabel,
 	)
 }
