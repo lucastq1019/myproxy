@@ -616,6 +616,9 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	headerButtons := container.NewHBox(
 		mw.homeLogoIcon,
 		layout.NewSpacer(),
+		NewButtonWithIcon("订阅", theme.StorageIcon(), func() {
+			mw.ShowSubscriptionPage()
+		}),
 		NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
 			mw.ShowSettingsPage()
 		}),
