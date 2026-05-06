@@ -70,7 +70,7 @@ func (xcs *XrayControlService) StartProxy(oldInstance *xray.XrayInstance, logFil
 		// 注意：这里不销毁 oldInstance，由调用者负责
 	}
 
-	// 使用固定的10808端口监听本地SOCKS5
+	// 使用固定的 10808 端口监听本地混合入站（SOCKS5 + HTTP）
 	proxyPort := 10808
 
 	// 记录开始启动日志

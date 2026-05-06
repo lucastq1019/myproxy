@@ -559,7 +559,7 @@ type RoutingOptions struct {
 
 // CreateXrayConfig 创建完整的 xray 配置。
 // 参数：
-//   - localPort: 本地 SOCKS5 监听端口（默认 10808）
+//   - localPort: 本地混合入站监听端口（SOCKS5 + HTTP，默认 10808）
 //   - server: 服务器配置，用于创建出站配置
 //   - logFilePath: 日志文件路径（可选，为空则不设置）
 //   - routing: 路由选项（可选，nil 则仅使用内置规则）
@@ -568,9 +568,9 @@ func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, rou
 		localPort = 10808
 	}
 
-	// 创建入站配置（本地 SOCKS5 服务器）
+	// 创建入站配置：Xray Socks 入站同时接受 SOCKS5 与 HTTP（同一端口）
 	inbound := map[string]interface{}{
-		"tag":      "socks-in",
+		"tag":      "mixed-in",
 		"listen":   "127.0.0.1",
 		"port":     localPort,
 		"protocol": "socks",

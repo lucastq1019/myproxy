@@ -363,8 +363,8 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		terminalProxyCheck.SetChecked(sp.appState.ConfigService.GetTerminalProxyEnabled())
 	}
 
-	// 代理类型选择
-	proxyTypeOptions := []string{"socks5", "https"}
+	// 代理类型：http = 明文 HTTP 代理（CONNECT）；https_tls = 与代理之间 TLS（https://）
+	proxyTypeOptions := []string{"socks5", "http", "https_tls"}
 	proxyTypeSelect := widget.NewSelect(proxyTypeOptions, func(s string) {
 		if sp.appState != nil && sp.appState.ConfigService != nil {
 			_ = sp.appState.ConfigService.SetProxyType(s)
@@ -374,6 +374,8 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		proxyTypeSelect.SetSelected(sp.appState.ConfigService.GetProxyType())
 	}
 	proxyTypeLabel := widget.NewLabel("代理类型")
+	proxyTypeHint := widget.NewLabel("http：CONNECT（含 HTTPS 站点）；https_tls：代理地址为 https://（需代理端 TLS）")
+	proxyTypeHint.Wrapping = fyne.TextWrapWord
 
 	// 代理配置区域：包含"终端代理"标题、"不走直连"、"重置"按钮
 	proxyConfigArea := container.NewVBox(
@@ -381,6 +383,7 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		container.NewVBox(
 			proxyTypeLabel,
 			proxyTypeSelect,
+			proxyTypeHint,
 		),
 		widget.NewSeparator(),
 		container.NewHBox(sp.routeUseProxy, resetBtn, layout.NewSpacer()),

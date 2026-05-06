@@ -213,7 +213,7 @@ func (ns *NodesStore) GetBySubscriptionID(subscriptionID int64) ([]*model.Node, 
 
 type SubscriptionsStore struct {
 	mu                   sync.RWMutex
-	subscriptions        []*database.Subscription
+	subscriptions        []*model.Subscription
 	SubscriptionsBinding binding.UntypedList
 	LabelsBinding        binding.StringList
 	subscriptionManager  *subscription.SubscriptionManager

@@ -71,10 +71,7 @@ func (p *DarwinProxy) SetSystemProxy(host string, port int) error {
 
 // SetTerminalProxy 设置终端代理（使用外部shell文件方案）
 func (p *DarwinProxy) SetTerminalProxy(host string, port int, proxyType string) error {
-	if proxyType == "" {
-		proxyType = "socks5"
-	}
-	proxyURL := fmt.Sprintf("%s://%s:%d", proxyType, host, port)
+	proxyURL := TerminalProxyURL(host, port, proxyType)
 
 	// 1. 设置当前进程环境变量（立即生效）
 	os.Setenv("HTTP_PROXY", proxyURL)

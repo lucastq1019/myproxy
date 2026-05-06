@@ -30,10 +30,7 @@ func (p *LinuxProxy) SetSystemProxy(host string, port int) error {
 }
 
 func (p *LinuxProxy) SetTerminalProxy(host string, port int, proxyType string) error {
-	if proxyType == "" {
-		proxyType = "socks5"
-	}
-	proxyURL := fmt.Sprintf("%s://%s:%d", proxyType, host, port)
+	proxyURL := TerminalProxyURL(host, port, proxyType)
 
 	// 设置当前进程环境变量
 	os.Setenv("HTTP_PROXY", proxyURL)

@@ -100,7 +100,7 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 	case "terminal":
 		_ = ps.systemProxy.ClearSystemProxy()
 		_ = ps.systemProxy.ClearTerminalProxy()
-		// 获取代理类型
+		// 获取代理类型：socks5 / http（CONNECT）/ https_tls（代理 URL 为 https://）
 		proxyType := "socks5"
 		if ps.configService != nil {
 			proxyType = ps.configService.GetProxyType()
@@ -113,7 +113,12 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 					proxyPort = port
 				}
 			}
-			logMessage = fmt.Sprintf("已设置环境变量代理: socks5://127.0.0.1:%d (已写入shell配置文件)", proxyPort)
+			proxyURL := systemproxy.TerminalProxyURL("127.0.0.1", proxyPort, proxyType)
+			if proxyType == "https_tls" {
+				logMessage = fmt.Sprintf("已设置环境变量代理: %s（HTTPS 到代理；本地默认入站为明文时请选 http）", proxyURL)
+			} else {
+				logMessage = fmt.Sprintf("已设置环境变量代理: %s（本地入站同时支持 SOCKS5 与 HTTP）", proxyURL)
+			}
 		} else {
 			logMessage = fmt.Sprintf("设置环境变量代理失败: %v", err)
 		}

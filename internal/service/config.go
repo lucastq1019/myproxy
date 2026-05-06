@@ -382,18 +382,22 @@ func (cs *ConfigService) SetTerminalProxyEnabled(enabled bool) error {
 }
 
 // GetProxyType 获取代理类型配置。
-// 返回：代理类型（https 或 socks5）
+// 返回：代理类型（socks5、http、https_tls）；历史值 "https"（实为 HTTP CONNECT）会迁移为 "http"。
 func (cs *ConfigService) GetProxyType() string {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return "socks5" // 默认使用 socks5
 	}
 	v, _ := cs.store.AppConfig.GetWithDefault("proxyType", "socks5")
+	if v == "https" {
+		_ = cs.store.AppConfig.Set("proxyType", "http")
+		return "http"
+	}
 	return v
 }
 
 // SetProxyType 设置代理类型配置。
 // 参数：
-//   - proxyType: 代理类型（https 或 socks5）
+//   - proxyType: 代理类型（socks5、http、https_tls）
 //
 // 返回：错误（如果有）
 func (cs *ConfigService) SetProxyType(proxyType string) error {

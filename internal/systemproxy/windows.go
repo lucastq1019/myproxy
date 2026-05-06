@@ -77,9 +77,8 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 	}
 	defer key.Close()
 
-	// 设置代理服务器地址，格式：socks=host:port
-	// 注意：在Windows中，需要指定代理类型为socks，否则默认使用HTTP代理
-	proxyServer := fmt.Sprintf("socks=%s:%d", host, port)
+	// 与 macOS 一致：本地入站为 SOCKS5 + HTTP 混合端口，需同时声明 http/https/socks
+	proxyServer := fmt.Sprintf("http=%s:%d;https=%s:%d;socks=%s:%d", host, port, host, port, host, port)
 	if err := key.SetStringValue("ProxyServer", proxyServer); err != nil {
 		return fmt.Errorf("设置代理服务器地址失败: %v", err)
 	}
@@ -103,10 +102,7 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 // SetTerminalProxy 设置终端代理（环境变量代理）
 // Windows 可以通过设置用户环境变量实现持久化
 func (p *WindowsProxy) SetTerminalProxy(host string, port int, proxyType string) error {
-	if proxyType == "" {
-		proxyType = "socks5"
-	}
-	proxyURL := fmt.Sprintf("%s://%s:%d", proxyType, host, port)
+	proxyURL := TerminalProxyURL(host, port, proxyType)
 
 	// 1. 设置当前进程环境变量（立即生效）
 	os.Setenv("HTTP_PROXY", proxyURL)
