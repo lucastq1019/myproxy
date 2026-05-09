@@ -15,6 +15,39 @@ import (
 // DB 数据库连接
 var DB *sql.DB
 
+// DefaultMixedInboundPort 本地混合入站（SOCKS5+HTTP）默认端口；须与 internal/xray.DefaultMixedInboundPort 数值一致。
+const DefaultMixedInboundPort = 10808
+
+// defaultAppConfigEntries 应用配置内置默认值；InitDefaultConfig 仅在键不存在时写入，不覆盖用户已有数据。
+var defaultAppConfigEntries = map[string]string{
+	"logLevel":                   "info",
+	"logFile":                    "myproxy.log",
+	"theme":                      "dark",
+	"autoProxyEnabled":           "false",
+	"autoProxyPort":              "10808",
+	"selectedServerID":           "",
+	"selectedSubscriptionID":     "0",
+	"debugPprofEnabled":          "false",
+	"debugPprofAddr":             "127.0.0.1:6060",
+	"diagnosticsSamplingSeconds": "5",
+	"diagnosticsDir":             "",
+	"lastNodeSwitchAt":           "",
+	"lastSubscriptionUpdateAt":   "",
+	"lastDiagnosticExport":       "",
+	"autoStartProxy":             "false",
+	"systemProxyMode":            "清除系统代理",
+	"terminalProxyEnabled":       "false",
+	"proxyType":                  "socks5",
+	"directRoutes":             "",
+	"directRoutesUseProxy":       "false",
+	"logsCollapsed":              "true",
+}
+
+// AppConfigBuiltinDefault 返回与 InitDefaultConfig 一致的内置默认值（未知键返回空字符串）。
+func AppConfigBuiltinDefault(key string) string {
+	return defaultAppConfigEntries[key]
+}
+
 // InitDB 初始化 SQLite 数据库，创建必要的表结构。
 // 如果数据库文件不存在，会自动创建。如果表已存在，不会重复创建。
 // 参数：
@@ -179,37 +212,13 @@ func createTables() error {
 	return nil
 }
 
-// InitDefaultConfig 初始化默认配置到数据库。
-// 如果配置已存在则跳过，避免覆盖用户设置。
-// 使用硬编码默认值，避免暴露敏感信息。
+// InitDefaultConfig 将 defaultAppConfigEntries 中缺失的键写入 app_config（已存在则保留原值）。
 func InitDefaultConfig() error {
-	// 定义默认配置（硬编码，避免暴露）
-	defaultConfigs := map[string]string{
-		"logLevel":                   "info",        // 日志级别：info（生产环境默认）
-		"logFile":                    "myproxy.log", // 日志文件
-		"theme":                      "dark",        // 主题：dark（默认黑色主题）
-		"autoProxyEnabled":           "false",       // 自动代理：默认关闭
-		"autoProxyPort":              "1080",        // 自动代理端口：默认1080
-		"selectedServerID":           "",            // 选中的服务器ID：默认空
-		"selectedSubscriptionID":     "0",           // 选中的订阅ID：默认0（全部）
-		"debugPprofEnabled":          "false",
-		"debugPprofAddr":             "127.0.0.1:6060",
-		"diagnosticsSamplingSeconds": "5",
-		"diagnosticsDir":             "",
-		"lastNodeSwitchAt":           "",
-		"lastSubscriptionUpdateAt":   "",
-		"lastDiagnosticExport":       "",
-	}
-
-	// 遍历默认配置，如果不存在则写入
-	for key, defaultValue := range defaultConfigs {
-		// 使用 GetAppConfigWithDefault 会自动写入默认值（如果不存在）
-		_, err := GetAppConfigWithDefault(key, defaultValue)
-		if err != nil {
+	for key, defaultValue := range defaultAppConfigEntries {
+		if _, err := GetAppConfigWithDefault(key, defaultValue); err != nil {
 			return fmt.Errorf("初始化配置 %s 失败: %w", key, err)
 		}
 	}
-
 	return nil
 }
 

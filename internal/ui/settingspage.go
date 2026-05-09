@@ -358,6 +358,9 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		if sp.appState != nil && sp.appState.ConfigService != nil {
 			_ = sp.appState.ConfigService.SetTerminalProxyEnabled(b)
 		}
+		if sp.appState != nil && sp.appState.MainWindow != nil {
+			_ = sp.appState.MainWindow.ReapplyPersistedSystemProxyFromConfig()
+		}
 	})
 	if sp.appState != nil && sp.appState.ConfigService != nil {
 		terminalProxyCheck.SetChecked(sp.appState.ConfigService.GetTerminalProxyEnabled())
@@ -368,6 +371,9 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	proxyTypeSelect := widget.NewSelect(proxyTypeOptions, func(s string) {
 		if sp.appState != nil && sp.appState.ConfigService != nil {
 			_ = sp.appState.ConfigService.SetProxyType(s)
+		}
+		if sp.appState != nil && sp.appState.MainWindow != nil {
+			_ = sp.appState.MainWindow.ReapplyPersistedSystemProxyFromConfig()
 		}
 	})
 	if sp.appState != nil && sp.appState.ConfigService != nil {

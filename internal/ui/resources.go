@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -25,14 +26,19 @@ var (
 
 // getIconDir 获取图标存储目录
 func getIconDir() string {
-	// 获取可执行文件所在目录
 	execPath, err := os.Executable()
 	if err != nil {
-		// 如果获取失败，使用当前工作目录
 		wd, _ := os.Getwd()
 		return filepath.Join(wd, "assets")
 	}
 	execDir := filepath.Dir(execPath)
+	// go run 将二进制放在系统临时目录的 go-build* 下，与 go build 产物路径不一致；
+	// 此时应用数据（数据库、日志等）仍以工作目录为准，图标目录应对齐到工作目录。
+	if strings.Contains(strings.ToLower(execDir), "go-build") {
+		if wd, err := os.Getwd(); err == nil {
+			return filepath.Join(wd, "assets")
+		}
+	}
 	return filepath.Join(execDir, "assets")
 }
 

@@ -467,57 +467,74 @@ func NewSubscriptionManager() *SubscriptionManager {
 	return sm
 }
 
-// FetchSubscription 从URL获取订阅服务器列表
-// label 参数用于为订阅添加标签，如果为空则使用默认标签
-func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([]model.Node, error) {
-	// 发送HTTP请求获取订阅内容
+// downloadAndParseSubscription 仅发起 HTTP 请求并解析订阅正文，不写数据库。
+func (sm *SubscriptionManager) downloadAndParseSubscription(url string) ([]model.Node, error) {
 	resp, err := sm.client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("获取订阅失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应内容
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("读取订阅内容失败: %w", err)
 	}
 
-	// 解析订阅内容
 	servers, err := sm.parseSubscription(string(body))
 	if err != nil {
 		return nil, fmt.Errorf("解析订阅失败: %w", err)
 	}
 
-	// 保存订阅到数据库
-	subscriptionLabel := ""
-	if len(label) > 0 && label[0] != "" {
-		subscriptionLabel = label[0]
-	}
+	return servers, nil
+}
 
+// persistSubscriptionServers 将解析得到的节点写入数据库。restoreByID 非 nil 时优先用其中保存的 Selected/Delay（用于订阅更新），否则回退到数据库已有记录。
+func (sm *SubscriptionManager) persistSubscriptionServers(url, subscriptionLabel string, servers []model.Node, restoreByID map[string]struct {
+	Selected bool
+	Delay    int
+}) error {
 	sub, err := database.AddOrUpdateSubscription(url, subscriptionLabel)
 	if err != nil {
-		return nil, fmt.Errorf("保存订阅到数据库失败: %w", err)
+		return fmt.Errorf("保存订阅到数据库失败: %w", err)
 	}
 
-	// 保存服务器到数据库
 	var subscriptionID *int64
 	if sub != nil {
 		subscriptionID = &sub.ID
 	}
 
 	for _, s := range servers {
-		// 检查服务器是否已存在，保留选中状态和延迟
-		existingServer, err := database.GetServer(s.ID)
-		if err == nil && existingServer != nil {
-			// 服务器已存在，保留选中状态和延迟
+		if state, ok := restoreByID[s.ID]; ok {
+			s.Selected = state.Selected
+			s.Delay = state.Delay
+		} else if existingServer, err := database.GetServer(s.ID); err == nil && existingServer != nil {
 			s.Selected = existingServer.Selected
 			s.Delay = existingServer.Delay
 		}
 
 		if err := database.AddOrUpdateServer(s, subscriptionID); err != nil {
-			return nil, fmt.Errorf("保存服务器到数据库失败: %w", err)
+			return fmt.Errorf("保存服务器到数据库失败: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// FetchSubscription 从URL获取订阅服务器列表
+// label 参数用于为订阅添加标签，如果为空则使用默认标签
+func (sm *SubscriptionManager) FetchSubscription(url string, label ...string) ([]model.Node, error) {
+	servers, err := sm.downloadAndParseSubscription(url)
+	if err != nil {
+		return nil, err
+	}
+
+	subscriptionLabel := ""
+	if len(label) > 0 && label[0] != "" {
+		subscriptionLabel = label[0]
+	}
+
+	if err := sm.persistSubscriptionServers(url, subscriptionLabel, servers, nil); err != nil {
+		return nil, err
 	}
 
 	return servers, nil
@@ -564,43 +581,21 @@ func (sm *SubscriptionManager) UpdateSubscription(url string, label ...string) e
 				}
 			}
 		}
+	}
 
-		// 清理该订阅下的旧服务器
+	servers, err := sm.downloadAndParseSubscription(url)
+	if err != nil {
+		return err
+	}
+
+	if existingSub != nil {
 		if err := database.DeleteServersBySubscriptionID(existingSub.ID); err != nil {
 			return fmt.Errorf("清理旧订阅服务器失败: %w", err)
 		}
 	}
 
-	// 拉取并保存最新服务器；内部会更新订阅标签并写库
-	servers, err := sm.FetchSubscription(url, subscriptionLabel)
-	if err != nil {
+	if err := sm.persistSubscriptionServers(url, subscriptionLabel, servers, serverStates); err != nil {
 		return err
-	}
-
-	// 再次获取订阅信息（防止标签更新或首次创建）
-	sub, err := database.GetSubscriptionByURL(url)
-	if err != nil {
-		return fmt.Errorf("获取订阅信息失败: %w", err)
-	}
-
-	var subscriptionID *int64
-	if sub != nil {
-		subscriptionID = &sub.ID
-	}
-
-	// 更新服务器列表，恢复之前保存的状态
-	for _, s := range servers {
-		// 如果之前保存了状态，恢复它
-		if state, ok := serverStates[s.ID]; ok {
-			s.Selected = state.Selected
-			s.Delay = state.Delay
-		}
-
-		// 更新数据库中的服务器信息（确保 subscriptionID 正确关联）
-		// 注意：Store 会在订阅更新后自动刷新节点数据（通过 parentStore）
-		if err := database.AddOrUpdateServer(s, subscriptionID); err != nil {
-			return fmt.Errorf("更新服务器到数据库失败: %w", err)
-		}
 	}
 
 	return nil

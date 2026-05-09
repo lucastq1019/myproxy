@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/theme"
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/logging"
 	"myproxy.com/p/internal/service"
 	"myproxy.com/p/internal/store"
@@ -132,13 +133,13 @@ func (a *AppState) InitLogger() error {
 		}
 	}
 
-	logFile := "myproxy.log"
-	logLevel := "info"
+	logFile := database.AppConfigBuiltinDefault("logFile")
+	logLevel := database.AppConfigBuiltinDefault("logLevel")
 	if a.Store != nil && a.Store.AppConfig != nil {
-		if file, err := a.Store.AppConfig.GetWithDefault("logFile", "myproxy.log"); err == nil {
+		if file, err := a.Store.AppConfig.GetWithDefault("logFile", database.AppConfigBuiltinDefault("logFile")); err == nil {
 			logFile = file
 		}
-		if level, err := a.Store.AppConfig.GetWithDefault("logLevel", "info"); err == nil {
+		if level, err := a.Store.AppConfig.GetWithDefault("logLevel", database.AppConfigBuiltinDefault("logLevel")); err == nil {
 			logLevel = level
 		}
 	}
@@ -277,12 +278,12 @@ func (a *AppState) autoLoadProxyConfig() error {
 		return fmt.Errorf("应用状态: Store 未初始化")
 	}
 
-	autoStart, err := a.Store.AppConfig.GetWithDefault("autoStartProxy", "false")
+	autoStart, err := a.Store.AppConfig.GetWithDefault("autoStartProxy", database.AppConfigBuiltinDefault("autoStartProxy"))
 	if err != nil || autoStart != "true" {
 		return nil
 	}
 
-	selectedServerID, err := a.Store.AppConfig.GetWithDefault("selectedServerID", "")
+	selectedServerID, err := a.Store.AppConfig.GetWithDefault("selectedServerID", database.AppConfigBuiltinDefault("selectedServerID"))
 	if err != nil || selectedServerID == "" {
 		return fmt.Errorf("应用状态: 未找到保存的选中服务器")
 	}

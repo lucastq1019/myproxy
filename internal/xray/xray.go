@@ -552,6 +552,9 @@ func buildSSStreamSettings(server *model.Node) map[string]interface{} {
 }
 
 // RoutingOptions 路由相关配置（直连列表、直连列表是否走代理等）。
+// DefaultMixedInboundPort 本地混合入站（SOCKS5 + HTTP）默认端口；数值须与 database.DefaultMixedInboundPort 一致。
+const DefaultMixedInboundPort = 10808
+
 type RoutingOptions struct {
 	DirectRoutes         []string // 用户配置的直连列表（domain:xxx 或 ip/cidr）
 	DirectRoutesUseProxy bool     // true：直连列表走代理；false：走直连
@@ -565,7 +568,7 @@ type RoutingOptions struct {
 //   - routing: 路由选项（可选，nil 则仅使用内置规则）
 func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, routing *RoutingOptions) ([]byte, error) {
 	if localPort == 0 {
-		localPort = 10808
+		localPort = DefaultMixedInboundPort
 	}
 
 	// 创建入站配置：Xray Socks 入站同时接受 SOCKS5 与 HTTP（同一端口）

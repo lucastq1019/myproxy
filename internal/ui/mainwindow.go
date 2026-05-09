@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/logging"
 	"myproxy.com/p/internal/service"
 	"myproxy.com/p/internal/store"
@@ -248,10 +249,8 @@ type SystemProxyMode int
 const (
 	// SystemProxyModeClear 清除系统代理
 	SystemProxyModeClear SystemProxyMode = iota
-	// SystemProxyModeAuto 自动配置系统代理
+	// SystemProxyModeAuto 自动配置系统代理（终端环境变量由设置页「终端代理」选项决定，非独立模式）
 	SystemProxyModeAuto
-	// SystemProxyModeTerminal 环境变量代理
-	SystemProxyModeTerminal
 )
 
 // String 返回完整模式名称（用于存储和日志）
@@ -261,8 +260,6 @@ func (m SystemProxyMode) String() string {
 		return "清除系统代理"
 	case SystemProxyModeAuto:
 		return "自动配置系统代理"
-	case SystemProxyModeTerminal:
-		return "环境变量代理"
 	default:
 		return ""
 	}
@@ -275,8 +272,6 @@ func (m SystemProxyMode) ShortString() string {
 		return "清除"
 	case SystemProxyModeAuto:
 		return "系统"
-	case SystemProxyModeTerminal:
-		return "终端"
 	default:
 		return ""
 	}
@@ -290,7 +285,8 @@ func ParseSystemProxyMode(fullModeName string) SystemProxyMode {
 	case "自动配置系统代理":
 		return SystemProxyModeAuto
 	case "环境变量代理":
-		return SystemProxyModeTerminal
+		// 历史持久化值：终端仅为设置项，不再作为独立模式，按「清除系统代理」处理（并见启动时迁移）
+		return SystemProxyModeClear
 	default:
 		return SystemProxyModeClear // 默认返回清除模式
 	}
@@ -304,7 +300,7 @@ func ParseSystemProxyModeFromShort(shortModeName string) SystemProxyMode {
 	case "系统":
 		return SystemProxyModeAuto
 	case "终端":
-		return SystemProxyModeTerminal
+		return SystemProxyModeClear
 	default:
 		return SystemProxyModeClear // 默认返回清除模式
 	}
@@ -357,8 +353,12 @@ func NewMainWindow(appState *AppState) *MainWindow {
 
 	// 布局配置由 Store 管理，无需在这里加载
 
-	// 创建系统代理管理器（默认使用 localhost:10808）
-	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", 10808)
+	// 创建系统代理管理器（端口与 xray 入站、autoProxyPort 一致）
+	localPort := database.DefaultMixedInboundPort
+	if appState != nil && appState.ConfigService != nil {
+		localPort = appState.ConfigService.GetLocalInboundPort()
+	}
+	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", localPort)
 
 	return mw
 }
@@ -505,10 +505,6 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 			savedModeStr := mw.appState.ConfigService.GetSystemProxyMode()
 			if savedModeStr != "" {
 				savedMode := ParseSystemProxyMode(savedModeStr)
-				// 如果保存的是终端模式，转换为清除模式（因为终端模式已移除）
-				if savedMode == SystemProxyModeTerminal {
-					savedMode = SystemProxyModeClear
-				}
 				mw.updateProxyModeButtonsState(savedMode)
 			}
 		}
@@ -520,6 +516,11 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 		if mw.appState != nil && mw.appState.ConfigService != nil {
 			savedModeStr := mw.appState.ConfigService.GetSystemProxyMode()
 			if savedModeStr != "" {
+				// 终端代理仅为设置项：历史「环境变量代理」模式写入为「清除系统代理」
+				if savedModeStr == "环境变量代理" {
+					_ = mw.appState.ConfigService.SetSystemProxyMode(SystemProxyModeClear.String())
+					savedModeStr = SystemProxyModeClear.String()
+				}
 				savedMode := ParseSystemProxyMode(savedModeStr)
 				// 应用系统代理设置（不保存到 Store，因为这是从 Store 恢复的）
 				_ = mw.applySystemProxyModeWithoutSave(savedMode)
@@ -914,6 +915,14 @@ func (mw *MainWindow) startProxy() {
 		mw.nodePageInstance.Refresh()
 	}
 
+	// 入站端口就绪后同步系统代理与终端环境变量（不写回 Store）；终端仅在与「系统」模式同时启用时写入
+	if mw.appState.ConfigService != nil {
+		persisted := ParseSystemProxyMode(mw.appState.ConfigService.GetSystemProxyMode())
+		if persisted == SystemProxyModeAuto && mw.appState.ConfigService.GetTerminalProxyEnabled() {
+			_ = mw.applySystemProxyModeCore(SystemProxyModeAuto, false)
+		}
+	}
+
 	// 显示成功对话框
 	if mw.appState.Window != nil && result.XrayInstance != nil {
 		selectedNode := mw.appState.Store.Nodes.GetSelected()
@@ -1070,8 +1079,11 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 		return fmt.Errorf("appState 未初始化")
 	}
 
-	// 获取当前代理端口
-	proxyPort := 10808
+	// 获取当前代理端口（运行中以 xray 为准，否则与配置 autoProxyPort 一致）
+	proxyPort := database.DefaultMixedInboundPort
+	if mw.appState != nil && mw.appState.ConfigService != nil {
+		proxyPort = mw.appState.ConfigService.GetLocalInboundPort()
+	}
 	if mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
 		if port := mw.appState.XrayInstance.GetPort(); port > 0 {
 			proxyPort = port
@@ -1248,7 +1260,10 @@ func (mw *MainWindow) updateSystemProxyPort() {
 		return
 	}
 
-	proxyPort := 10808
+	proxyPort := database.DefaultMixedInboundPort
+	if mw.appState != nil && mw.appState.ConfigService != nil {
+		proxyPort = mw.appState.ConfigService.GetLocalInboundPort()
+	}
 	if mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
 		if port := mw.appState.XrayInstance.GetPort(); port > 0 {
 			proxyPort = port
@@ -1276,4 +1291,22 @@ func (mw *MainWindow) saveSystemProxyState(mode SystemProxyMode) {
 func (mw *MainWindow) applySystemProxyModeWithoutSave(mode SystemProxyMode) error {
 	// 使用核心方法，但不保存到 Store
 	return mw.applySystemProxyModeCore(mode, false)
+}
+
+// ReapplyPersistedSystemProxyFromConfig 按数据库中已保存的模式重新应用系统代理与终端环境变量（不写回 Store）。
+// 终端代理仅为设置项：仅在当前持久化模式为「自动配置系统代理」时生效。
+// 用于设置页变更代理类型或「终端代理」勾选后，与主页「系统」模式立即同步。
+func (mw *MainWindow) ReapplyPersistedSystemProxyFromConfig() error {
+	if mw.appState == nil || mw.appState.ConfigService == nil {
+		return nil
+	}
+	modeStr := mw.appState.ConfigService.GetSystemProxyMode()
+	if modeStr == "" {
+		return nil
+	}
+	mode := ParseSystemProxyMode(modeStr)
+	if mode != SystemProxyModeAuto {
+		return nil
+	}
+	return mw.applySystemProxyModeCore(SystemProxyModeAuto, false)
 }

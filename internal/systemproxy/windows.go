@@ -31,6 +31,8 @@ const (
 	hwndBroadcast                 = 0xffff
 	wmSettingChange               = 0x001A
 	smtoAbortIfHung               = 0x0002
+	// 终端环境变量代理使用的 NO_PROXY，避免环回与本地服务误走代理
+	windowsTerminalNoProxy = "localhost,127.0.0.1,::1"
 )
 
 func newWindowsProxy(host string, port int) *WindowsProxy {
@@ -111,6 +113,8 @@ func (p *WindowsProxy) SetTerminalProxy(host string, port int, proxyType string)
 	os.Setenv("https_proxy", proxyURL)
 	os.Setenv("ALL_PROXY", proxyURL)
 	os.Setenv("all_proxy", proxyURL)
+	os.Setenv("NO_PROXY", windowsTerminalNoProxy)
+	os.Setenv("no_proxy", windowsTerminalNoProxy)
 
 	// 2. 设置用户环境变量（持久化）
 	// 通过注册表设置用户环境变量：HKEY_CURRENT_USER\Environment
@@ -132,6 +136,8 @@ func (p *WindowsProxy) SetTerminalProxy(host string, port int, proxyType string)
 	_ = envKey.SetStringValue("https_proxy", proxyURL)
 	_ = envKey.SetStringValue("ALL_PROXY", proxyURL)
 	_ = envKey.SetStringValue("all_proxy", proxyURL)
+	_ = envKey.SetStringValue("NO_PROXY", windowsTerminalNoProxy)
+	_ = envKey.SetStringValue("no_proxy", windowsTerminalNoProxy)
 
 	return notifyWindowsEnvironmentChanged()
 }
@@ -145,6 +151,8 @@ func (p *WindowsProxy) ClearTerminalProxy() error {
 	os.Unsetenv("https_proxy")
 	os.Unsetenv("ALL_PROXY")
 	os.Unsetenv("all_proxy")
+	os.Unsetenv("NO_PROXY")
+	os.Unsetenv("no_proxy")
 
 	// 2. 从用户环境变量中删除（持久化清除）
 	envKey, err := registry.OpenKey(
@@ -165,6 +173,8 @@ func (p *WindowsProxy) ClearTerminalProxy() error {
 	_ = envKey.DeleteValue("https_proxy")
 	_ = envKey.DeleteValue("ALL_PROXY")
 	_ = envKey.DeleteValue("all_proxy")
+	_ = envKey.DeleteValue("NO_PROXY")
+	_ = envKey.DeleteValue("no_proxy")
 
 	return notifyWindowsEnvironmentChanged()
 }
@@ -222,6 +232,7 @@ func broadcastSettingChange(target string) error {
 	if err != nil {
 		return fmt.Errorf("编码 Windows 设置变更消息失败: %w", err)
 	}
+	var result uintptr
 	ret, _, callErr := procSendMessageTimeout.Call(
 		uintptr(hwndBroadcast),
 		uintptr(wmSettingChange),
@@ -229,7 +240,7 @@ func broadcastSettingChange(target string) error {
 		uintptr(unsafe.Pointer(targetPtr)),
 		uintptr(smtoAbortIfHung),
 		uintptr(5000),
-		0,
+		uintptr(unsafe.Pointer(&result)),
 	)
 	if ret == 0 {
 		if callErr != syscall.Errno(0) {
