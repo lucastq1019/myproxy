@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/model"
 	"myproxy.com/p/internal/store"
 )
@@ -168,7 +169,7 @@ func (ss *ServerService) getSelectedSubscriptionID() int64 {
 	// 从 AppConfig 获取选中的订阅ID
 	// 注意：这里假设订阅ID存储在 AppConfig 中，key 为 "selectedSubscriptionID"
 	// 如果 Store 中没有这个字段，可以考虑在 AppConfigStore 中添加专门的方法
-	subIDStr, err := ss.store.AppConfig.GetWithDefault("selectedSubscriptionID", "0")
+	subIDStr, err := ss.store.AppConfig.GetWithDefault("selectedSubscriptionID", database.AppConfigBuiltinDefault("selectedSubscriptionID"))
 	if err != nil {
 		return 0
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	rpprof "runtime/pprof"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -427,4 +429,74 @@ func (ds *DiagnosticsService) getConfigTime(key string) time.Time {
 func isLocalPprofAddr(addr string) bool {
 	addr = strings.ToLower(strings.TrimSpace(addr))
 	return strings.HasPrefix(addr, "127.0.0.1:") || strings.HasPrefix(addr, "localhost:")
+}
+
+func findFreeLocalPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	_ = l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+// validatePprofHTTPAccess 校验 pprof 已启用且地址为本机，返回 host:port（无 scheme）。
+func (ds *DiagnosticsService) validatePprofHTTPAccess() (string, error) {
+	if !ds.IsPprofEnabled() {
+		return "", fmt.Errorf("请先启用本地 pprof")
+	}
+	addr := strings.TrimSpace(ds.GetPprofAddr())
+	if addr == "" {
+		addr = "127.0.0.1:6060"
+	}
+	if !isLocalPprofAddr(addr) {
+		return "", fmt.Errorf("pprof 仅允许本机地址，当前为 %s", addr)
+	}
+	return addr, nil
+}
+
+// PprofIndexPageURL 返回标准库 pprof 索引页 URL（浏览器内可点进各 profile）。
+func (ds *DiagnosticsService) PprofIndexPageURL() (string, error) {
+	host, err := ds.validatePprofHTTPAccess()
+	if err != nil {
+		return "", err
+	}
+	return "http://" + host + "/debug/pprof/", nil
+}
+
+// PprofHeapTextURL 返回堆内存文本视图（debug=1），便于在浏览器中直接阅读分配情况。
+func (ds *DiagnosticsService) PprofHeapTextURL() (string, error) {
+	host, err := ds.validatePprofHTTPAccess()
+	if err != nil {
+		return "", err
+	}
+	return "http://" + host + "/debug/pprof/heap?debug=1", nil
+}
+
+// StartGoToolPprofHeapWebViewer 启动 `go tool pprof` 自带的 Web UI（含火焰图、Top、Source 等）。
+// 依赖本机已安装 Go 且 go 在 PATH 中；返回应在浏览器中打开的地址（根路径）。
+func (ds *DiagnosticsService) StartGoToolPprofHeapWebViewer() (string, error) {
+	host, err := ds.validatePprofHTTPAccess()
+	if err != nil {
+		return "", err
+	}
+	port, err := findFreeLocalPort()
+	if err != nil {
+		return "", fmt.Errorf("分配本地端口失败: %w", err)
+	}
+	heapSource := "http://" + host + "/debug/pprof/heap"
+	httpArg := "127.0.0.1:" + strconv.Itoa(port)
+	goExe, err := exec.LookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("未找到 go 可执行文件，无法启动交互式 pprof（需安装 Go 并配置 PATH）: %w", err)
+	}
+	cmd := exec.Command(goExe, "tool", "pprof", "-http="+httpArg, heapSource)
+	cmd.Env = os.Environ()
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("启动 go tool pprof 失败: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
+	// 等待 pprof Web 监听就绪后再让浏览器打开
+	time.Sleep(500 * time.Millisecond)
+	return "http://" + httpArg + "/", nil
 }

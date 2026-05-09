@@ -136,7 +136,7 @@ func (lp *LogsPanel) Build() fyne.CanvasObject {
 		container.NewGridWrap(fyne.NewSize(100, 40), lp.typeSel),
 		layout.NewSpacer(),
 	)
-	topBar := container.NewPadded(container.NewVBox(levelRow, typeRow))
+	topBar := newPaddedWithSize(container.NewVBox(levelRow, typeRow), innerPadding(lp.appState))
 
 	// 日志内容区域
 	lp.logScroll = container.NewScroll(lp.logContent)

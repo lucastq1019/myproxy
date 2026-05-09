@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -17,22 +18,26 @@ import (
 
 var (
 	// 图标缓存
-	trayIconCache     fyne.Resource
-	appIconCache      fyne.Resource
-	settingsLogoCache fyne.Resource
-	iconCacheMutex    sync.Mutex
+	trayIconCache  fyne.Resource
+	appIconCache   fyne.Resource
+	iconCacheMutex sync.Mutex
 )
 
 // getIconDir 获取图标存储目录
 func getIconDir() string {
-	// 获取可执行文件所在目录
 	execPath, err := os.Executable()
 	if err != nil {
-		// 如果获取失败，使用当前工作目录
 		wd, _ := os.Getwd()
 		return filepath.Join(wd, "assets")
 	}
 	execDir := filepath.Dir(execPath)
+	// go run 将二进制放在系统临时目录的 go-build* 下，与 go build 产物路径不一致；
+	// 此时应用数据（数据库、日志等）仍以工作目录为准，图标目录应对齐到工作目录。
+	if strings.Contains(strings.ToLower(execDir), "go-build") {
+		if wd, err := os.Getwd(); err == nil {
+			return filepath.Join(wd, "assets")
+		}
+	}
 	return filepath.Join(execDir, "assets")
 }
 
@@ -72,36 +77,6 @@ func createTrayIconResource(appState *AppState) fyne.Resource {
 
 	trayIconCache = createLShapeIcon(32, "tray-icon.png", appState)
 	return trayIconCache
-}
-
-// createSettingsLogo 创建设置页面logo资源（64x64，根据主题变化）
-// 参数：
-//   - appState: 应用状态（用于获取主题配置）
-// 注意：logo颜色与主题色相同，背景色根据主题变化
-func createSettingsLogo(appState *AppState) fyne.Resource {
-	// 获取当前主题variant，确保文件名包含完整的主题信息
-	themeVariant := theme.VariantDark
-	themeStr := ThemeDark
-	if appState != nil {
-		themeStr = appState.GetTheme()
-		switch themeStr {
-		case ThemeLight:
-			themeVariant = theme.VariantLight
-		case ThemeSystem:
-			if appState.App != nil {
-				themeVariant = appState.App.Settings().ThemeVariant()
-			}
-		default:
-			themeVariant = theme.VariantDark
-		}
-	}
-	// 文件名包含主题字符串和variant信息，确保不同主题使用不同文件
-	variantStr := "dark"
-	if themeVariant == theme.VariantLight {
-		variantStr = "light"
-	}
-	fileName := fmt.Sprintf("settings-logo-%s-%s.png", themeStr, variantStr)
-	return createLShapeIconWithVariant(64, fileName, themeVariant)
 }
 
 // createHomeLogo 创建主页logo资源（32x32，根据主题变化）

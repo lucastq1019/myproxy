@@ -85,32 +85,32 @@ func (p *Ping) TestAllServersDelay(servers []model.Node) map[string]int {
 
 **核心原则：禁止使用固定间距值，必须使用 Fyne 系统提供的间距**
 
-- 使用 `theme.SizeNameInnerPadding` 获取最小间距
-- 使用 `compactVBoxLayout` 减少组件间距
-- 使用 `newPaddedWithSize()` 替代 `container.NewPadded()`
-- 使用 `noSpacingBorderLayout` 移除 headerBar 下方的多余空白
+实现位于 [`internal/ui/layout_theme.go`](internal/ui/layout_theme.go)：
 
-获取间距方法：
+- `innerPadding(appState *AppState) float32`：读取当前主题的 `theme.SizeNameInnerPadding`（无 `App` 时回退 `theme.DefaultTheme()`）
+- `newPaddedWithSize(content, padding)`：四边统一留白，**禁止**再使用 `container.NewPadded`
+- `compactVBoxLayout` + `newCompactVBox(spacing, children...)`：纵向排列且子项间距为 `spacing`（通常传入 `innerPadding` 的返回值）。**注意**：含 `layout.NewSpacer()` 等需纵向伸展的栈仍用 `container.NewVBox`，不要用 `newCompactVBox`（Spacer 的 `MinSize` 为 0 会导致无法吃掉剩余高度）
+- `noSpacingBorderLayout`：**按需**。当前主页等使用 `container.NewBorder`；若回归发现标题栏与内容区间仍有多余空白，再单独实现无额外间距的 Border 布局
+
+获取间距（全页复用，不要在各 Page 复制一份）：
+
 ```go
-func (sp *SettingsPage) getInnerPadding() float32 {
-    if sp.appState != nil && sp.appState.App != nil {
-        return sp.appState.App.Settings().Theme().Size(theme.SizeNameInnerPadding)
-    }
-    return theme.DefaultTheme().Size(theme.SizeNameInnerPadding)
-}
+spacing := innerPadding(appState)
 ```
 
 使用示例：
-```go
-// 正确
-spacing := sp.getInnerPadding()
-content := container.NewWithoutLayout(items...)
-content.Layout = compactVBoxLayout{spacing: spacing}
-paddedContent := newPaddedWithSize(content, spacing)
 
-// 错误：禁止使用固定值
-content.Layout = compactVBoxLayout{spacing: 4}  // 禁止
-container.NewPadded(content)  // 禁止
+```go
+// 正确：紧凑纵向栈（无 Spacer）
+col := newCompactVBox(spacing, cardA, widget.NewSeparator(), cardB)
+padded := newPaddedWithSize(col, spacing)
+
+// 正确：需要 Spacer 占满剩余高度时用 Fyne 默认 VBox
+stack := container.NewVBox(top, layout.NewSpacer(), bottom)
+
+// 错误
+_ = container.NewPadded(content)                  // 禁止
+newCompactVBox(4, a, b)                             // 禁止写死间距数值
 ```
 
 ## 编码规范
@@ -168,7 +168,7 @@ VERSION=1.0.0 ./build.sh
 ## 约束
 
 - 唯一入口: cmd/gui/main.go
-- 数据库路径: ./data/myproxy.db（相对于config.json目录）
+- 数据库路径: ./data/myproxy.db
 - 日志自动归档
 - 构建需要CGO支持
 - 版本号: 环境变量VERSION或时间戳

@@ -571,7 +571,7 @@ func (ps *ProxyStatusStore) UpdateProxyStatus(xrayInstance interface {
 					if xrayInstance.GetPort() > 0 {
 						proxyPort = xrayInstance.GetPort()
 					} else {
-						proxyPort = 10808 // 默认端口
+						proxyPort = database.DefaultMixedInboundPort
 					}
 				}
 			}()

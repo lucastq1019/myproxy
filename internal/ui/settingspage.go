@@ -119,6 +119,9 @@ type SettingsPage struct {
 	// 诊断页
 	diagnosticsPage *DiagnosticsPage
 
+	// 代理配置面板（直连路由 + 终端/Git/类型）：构建较贵，缓存避免每次进入菜单重复创建
+	directRouteRoot fyne.CanvasObject
+
 	// 访问记录相关
 	accessRecordsList *widget.List
 	accessRecordsData []model.AccessRecord
@@ -135,6 +138,8 @@ func NewSettingsPage(appState *AppState) *SettingsPage {
 
 // Build 构建设置页面 UI。
 func (sp *SettingsPage) Build() fyne.CanvasObject {
+	sp.directRouteRoot = nil
+	pad := innerPadding(sp.appState)
 	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
 		if sp.appState != nil && sp.appState.MainWindow != nil {
 			sp.appState.MainWindow.Back()
@@ -143,14 +148,13 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	backBtn.Importance = widget.LowImportance
 
 	titleLabel := NewTitleLabel("设置")
-	headerBar := container.NewPadded(container.NewHBox(
+	headerBar := newPaddedWithSize(container.NewHBox(
 		backBtn,
 		layout.NewSpacer(),
 		titleLabel,
 		layout.NewSpacer(),
-	))
+	), pad)
 
-	// 左侧菜单
 	sp.menuButtons[0] = widget.NewButton("外观", func() { sp.switchMenu(SettingsMenuAppearance) })
 	sp.menuButtons[1] = widget.NewButton("代理配置", func() { sp.switchMenu(SettingsMenuDirectRoute) })
 	sp.menuButtons[2] = widget.NewButton("日志", func() { sp.switchMenu(SettingsMenuLog) })
@@ -162,7 +166,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[i].Importance = widget.LowImportance
 	}
 
-	// 将logo和菜单按钮组合在一起
+	// 左侧菜单按钮纵向排列
 	menuContent := container.NewVBox(
 		sp.menuButtons[0],
 		sp.menuButtons[1],
@@ -171,7 +175,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[4],
 		sp.menuButtons[5],
 	)
-	menuBox := container.NewPadded(menuContent)
+	menuBox := newPaddedWithSize(menuContent, pad)
 	// 极简柔光：浅色模式下侧边栏背景 #F1F5F9，增加物理隔离感
 	var sidebarBg fyne.CanvasObject
 	if sp.appState != nil && sp.appState.App != nil {
@@ -185,7 +189,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	// 右侧内容区，使用 Scroll 包裹避免内容撑开窗口
 	sp.contentCard = container.NewMax()
 	sp.contentCard.Add(sp.buildAppearanceContent())
-	contentArea := container.NewScroll(container.NewPadded(sp.contentCard))
+	contentArea := container.NewScroll(newPaddedWithSize(sp.contentCard, pad))
 
 	// 左右分栏：菜单固定宽度，完整展示菜单项；内容区占剩余空间（分隔不随窗口拖拽变化）
 	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 98}, leftColumn, contentArea)
@@ -208,7 +212,13 @@ func (sp *SettingsPage) switchMenu(menu SettingsMenu) {
 	case SettingsMenuAppearance:
 		sp.contentCard.Add(sp.buildAppearanceContent())
 	case SettingsMenuDirectRoute:
-		sp.contentCard.Add(sp.buildDirectRouteContent())
+		if sp.directRouteRoot != nil {
+			sp.contentCard.Add(sp.directRouteRoot)
+			sp.reloadDirectRouteListFromStore()
+		} else {
+			sp.directRouteRoot = sp.buildDirectRouteContent()
+			sp.contentCard.Add(sp.directRouteRoot)
+		}
 	case SettingsMenuLog:
 		sp.contentCard.Add(sp.buildLogContent())
 	case SettingsMenuAccessRecord:
@@ -235,9 +245,10 @@ func (sp *SettingsPage) updateMenuState() {
 }
 
 // buildThemePreview 构建主题预览区域
-func buildThemePreview() fyne.CanvasObject {
+func buildThemePreview(appState *AppState) fyne.CanvasObject {
+	pad := innerPadding(appState)
 	// 创建预览卡片
-	previewCard := container.NewVBox(
+	previewInner := container.NewVBox(
 		// 预览标题
 		widget.NewLabelWithStyle("主题预览", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		widget.NewSeparator(),
@@ -262,7 +273,7 @@ func buildThemePreview() fyne.CanvasObject {
 	)
 
 	// 添加边框和内边距
-	previewCard = container.NewPadded(previewCard)
+	previewCard := newPaddedWithSize(previewInner, pad)
 
 	// 创建一个带有最小大小的容器
 	minSizeContainer := container.NewMax(previewCard)
@@ -298,7 +309,7 @@ func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
 		themeSelect,
 		// 添加主题预览区域
 		widget.NewSeparator(),
-		buildThemePreview(),
+		buildThemePreview(sp.appState),
 	)
 }
 
@@ -306,13 +317,14 @@ func (sp *SettingsPage) buildAppearanceContent() fyne.CanvasObject {
 func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	sp.loadRoutes()
 
-	sp.routeUseProxy = widget.NewCheck("不走直连", func(b bool) {
+	sp.routeUseProxy = widget.NewCheck("不走直连", nil)
+	if sp.appState != nil && sp.appState.ConfigService != nil {
+		sp.routeUseProxy.SetChecked(sp.appState.ConfigService.GetDirectRoutesUseProxy())
+	}
+	sp.routeUseProxy.OnChanged = func(b bool) {
 		if sp.appState != nil && sp.appState.ConfigService != nil {
 			_ = sp.appState.ConfigService.SetDirectRoutesUseProxy(b)
 		}
-	})
-	if sp.appState != nil && sp.appState.ConfigService != nil {
-		sp.routeUseProxy.SetChecked(sp.appState.ConfigService.GetDirectRoutesUseProxy())
 	}
 
 	sp.routesList = widget.NewList(
@@ -353,25 +365,42 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	})
 	resetBtn.Importance = widget.LowImportance
 
-	// 终端代理配置选项
-	terminalProxyCheck := widget.NewCheck("终端代理", func(b bool) {
-		if sp.appState != nil && sp.appState.ConfigService != nil {
-			_ = sp.appState.ConfigService.SetTerminalProxyEnabled(b)
-		}
-	})
+	// 终端代理配置选项（先 SetChecked 再挂 OnChanged，避免初始化时多次触发系统代理重应用）
+	terminalProxyCheck := widget.NewCheck("终端代理", nil)
 	if sp.appState != nil && sp.appState.ConfigService != nil {
 		terminalProxyCheck.SetChecked(sp.appState.ConfigService.GetTerminalProxyEnabled())
 	}
+	terminalProxyCheck.OnChanged = func(b bool) {
+		if sp.appState != nil && sp.appState.ConfigService != nil {
+			_ = sp.appState.ConfigService.SetTerminalProxyEnabled(b)
+		}
+		sp.reapplyPersistedSystemProxyFromConfig()
+	}
+
+	gitProxyCheck := widget.NewCheck("Git 全局代理", nil)
+	if sp.appState != nil && sp.appState.ConfigService != nil {
+		gitProxyCheck.SetChecked(sp.appState.ConfigService.GetGitProxyEnabled())
+	}
+	gitProxyCheck.OnChanged = func(b bool) {
+		if sp.appState != nil && sp.appState.ConfigService != nil {
+			_ = sp.appState.ConfigService.SetGitProxyEnabled(b)
+		}
+		sp.reapplyPersistedSystemProxyFromConfig()
+	}
+	gitProxyHint := widget.NewLabel("将 http.proxy / https.proxy 写入 git config --global；未安装 Git 时自动跳过")
+	gitProxyHint.Wrapping = fyne.TextWrapWord
 
 	// 代理类型：http = 明文 HTTP 代理（CONNECT）；https_tls = 与代理之间 TLS（https://）
 	proxyTypeOptions := []string{"socks5", "http", "https_tls"}
-	proxyTypeSelect := widget.NewSelect(proxyTypeOptions, func(s string) {
+	proxyTypeSelect := widget.NewSelect(proxyTypeOptions, nil)
+	if sp.appState != nil && sp.appState.ConfigService != nil {
+		proxyTypeSelect.SetSelected(sp.appState.ConfigService.GetProxyType())
+	}
+	proxyTypeSelect.OnChanged = func(s string) {
 		if sp.appState != nil && sp.appState.ConfigService != nil {
 			_ = sp.appState.ConfigService.SetProxyType(s)
 		}
-	})
-	if sp.appState != nil && sp.appState.ConfigService != nil {
-		proxyTypeSelect.SetSelected(sp.appState.ConfigService.GetProxyType())
+		sp.reapplyPersistedSystemProxyFromConfig()
 	}
 	proxyTypeLabel := widget.NewLabel("代理类型")
 	proxyTypeHint := widget.NewLabel("http：CONNECT（含 HTTPS 站点）；https_tls：代理地址为 https://（需代理端 TLS）")
@@ -380,6 +409,10 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	// 代理配置区域：包含"终端代理"标题、"不走直连"、"重置"按钮
 	proxyConfigArea := container.NewVBox(
 		terminalProxyCheck,
+		container.NewVBox(
+			gitProxyCheck,
+			gitProxyHint,
+		),
 		container.NewVBox(
 			proxyTypeLabel,
 			proxyTypeSelect,
@@ -586,6 +619,21 @@ func (sp *SettingsPage) Cleanup() {
 	if sp.diagnosticsPage != nil {
 		sp.diagnosticsPage.Cleanup()
 		sp.diagnosticsPage = nil
+	}
+	sp.directRouteRoot = nil
+}
+
+// reloadDirectRouteListFromStore 在已缓存的代理配置面板存在时，仅重新拉取路由数据并刷新列表。
+func (sp *SettingsPage) reloadDirectRouteListFromStore() {
+	sp.loadRoutes()
+	if sp.routesList != nil {
+		sp.routesList.Refresh()
+	}
+}
+
+func (sp *SettingsPage) reapplyPersistedSystemProxyFromConfig() {
+	if sp.appState != nil && sp.appState.MainWindow != nil {
+		_ = sp.appState.MainWindow.ReapplyPersistedSystemProxyFromConfig()
 	}
 }
 

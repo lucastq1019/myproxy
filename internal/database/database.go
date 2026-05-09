@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -14,6 +16,96 @@ import (
 
 // DB 数据库连接
 var DB *sql.DB
+
+// DefaultMixedInboundPort 本地混合入站（SOCKS5+HTTP）默认端口；全项目唯一来源，xray 入站与 app_config 键 autoProxyPort 默认值均据此派生。
+const DefaultMixedInboundPort = 10808
+
+// defaultAppConfigEntries 应用配置内置默认值；InitDefaultConfig 仅在键不存在时写入，不覆盖用户已有数据。
+// autoProxyPort 在 init 中写入，与 DefaultMixedInboundPort 一致。
+var defaultAppConfigEntries = map[string]string{
+	"logLevel":                   "info",
+	"logFile":                    "myproxy.log",
+	"theme":                      "dark",
+	"autoProxyEnabled":           "false",
+	"selectedServerID":           "",
+	"selectedSubscriptionID":     "0",
+	"debugPprofEnabled":          "false",
+	"debugPprofAddr":             "127.0.0.1:6060",
+	"diagnosticsSamplingSeconds": "5",
+	"diagnosticsDir":             "",
+	"lastNodeSwitchAt":           "",
+	"lastSubscriptionUpdateAt":   "",
+	"lastDiagnosticExport":       "",
+	"autoStartProxy":             "false",
+	"systemProxyMode":            "清除系统代理",
+	"terminalProxyEnabled":       "false",
+	"gitProxyEnabled":            "false",
+	"proxyType":                  "socks5",
+	"directRoutes":             "",
+	"directRoutesUseProxy":       "false",
+	"logsCollapsed":              "true",
+}
+
+func init() {
+	defaultAppConfigEntries["autoProxyPort"] = strconv.Itoa(DefaultMixedInboundPort)
+}
+
+// app_config 内存缓存：读多写少，与 SQLite 表同步；避免频繁 QueryRow。
+var (
+	appConfigCacheMu    sync.RWMutex
+	appConfigCache      map[string]string
+	appConfigCacheReady bool
+)
+
+func appConfigInvalidateCache() {
+	appConfigCacheMu.Lock()
+	appConfigCache = nil
+	appConfigCacheReady = false
+	appConfigCacheMu.Unlock()
+}
+
+// ReloadAppConfigCache 从数据库全量重载 app_config 到内存（写入配置后若绕过 SetAppConfig 可调用）。
+func ReloadAppConfigCache() error {
+	if DB == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	rows, err := DB.Query(`SELECT key, value FROM app_config`)
+	if err != nil {
+		return fmt.Errorf("加载应用配置缓存失败: %w", err)
+	}
+	defer rows.Close()
+	next := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return fmt.Errorf("读取应用配置失败: %w", err)
+		}
+		next[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	appConfigCacheMu.Lock()
+	appConfigCache = next
+	appConfigCacheReady = true
+	appConfigCacheMu.Unlock()
+	return nil
+}
+
+func ensureAppConfigCache() error {
+	appConfigCacheMu.RLock()
+	ready := appConfigCacheReady && appConfigCache != nil
+	appConfigCacheMu.RUnlock()
+	if ready {
+		return nil
+	}
+	return ReloadAppConfigCache()
+}
+
+// AppConfigBuiltinDefault 返回与 InitDefaultConfig 一致的内置默认值（未知键返回空字符串）。
+func AppConfigBuiltinDefault(key string) string {
+	return defaultAppConfigEntries[key]
+}
 
 // InitDB 初始化 SQLite 数据库，创建必要的表结构。
 // 如果数据库文件不存在，会自动创建。如果表已存在，不会重复创建。
@@ -179,37 +271,33 @@ func createTables() error {
 	return nil
 }
 
-// InitDefaultConfig 初始化默认配置到数据库。
-// 如果配置已存在则跳过，避免覆盖用户设置。
-// 使用硬编码默认值，避免暴露敏感信息。
+// InitDefaultConfig 将 defaultAppConfigEntries 中缺失的键写入 app_config（已存在则保留原值）。
 func InitDefaultConfig() error {
-	// 定义默认配置（硬编码，避免暴露）
-	defaultConfigs := map[string]string{
-		"logLevel":                   "info",        // 日志级别：info（生产环境默认）
-		"logFile":                    "myproxy.log", // 日志文件
-		"theme":                      "dark",        // 主题：dark（默认黑色主题）
-		"autoProxyEnabled":           "false",       // 自动代理：默认关闭
-		"autoProxyPort":              "1080",        // 自动代理端口：默认1080
-		"selectedServerID":           "",            // 选中的服务器ID：默认空
-		"selectedSubscriptionID":     "0",           // 选中的订阅ID：默认0（全部）
-		"debugPprofEnabled":          "false",
-		"debugPprofAddr":             "127.0.0.1:6060",
-		"diagnosticsSamplingSeconds": "5",
-		"diagnosticsDir":             "",
-		"lastNodeSwitchAt":           "",
-		"lastSubscriptionUpdateAt":   "",
-		"lastDiagnosticExport":       "",
-	}
-
-	// 遍历默认配置，如果不存在则写入
-	for key, defaultValue := range defaultConfigs {
-		// 使用 GetAppConfigWithDefault 会自动写入默认值（如果不存在）
-		_, err := GetAppConfigWithDefault(key, defaultValue)
-		if err != nil {
+	for key, defaultValue := range defaultAppConfigEntries {
+		if _, err := GetAppConfigWithDefault(key, defaultValue); err != nil {
 			return fmt.Errorf("初始化配置 %s 失败: %w", key, err)
 		}
 	}
+	if err := migrateLegacyAutoProxyPort(); err != nil {
+		return err
+	}
+	return ReloadAppConfigCache()
+}
 
+// migrateLegacyAutoProxyPort 修正历史错误：曾将本地入站与 autoProxyPort 写成 10809，与 DefaultMixedInboundPort 不一致。
+// InitDefaultConfig 对已有键不会覆盖，故需显式 UPDATE；更新后由 ReloadAppConfigCache 刷新内存。
+func migrateLegacyAutoProxyPort() error {
+	if DB == nil {
+		return nil
+	}
+	want := strconv.Itoa(DefaultMixedInboundPort)
+	_, err := DB.Exec(
+		`UPDATE app_config SET value = ?, updated_at = ? WHERE key = ? AND value = ?`,
+		want, time.Now(), "autoProxyPort", "10809",
+	)
+	if err != nil {
+		return fmt.Errorf("迁移 autoProxyPort(10809→%s) 失败: %w", want, err)
+	}
 	return nil
 }
 
@@ -347,6 +435,7 @@ func migrateAccessRecordsTable() error {
 // 应该在应用退出时调用此方法以正确释放资源。
 // 返回：错误（如果有）
 func CloseDB() error {
+	appConfigInvalidateCache()
 	if DB != nil {
 		return DB.Close()
 	}
@@ -866,6 +955,9 @@ func GetLayoutConfig(key string) (string, error) {
 //
 // 返回：错误（如果有）
 func SetAppConfig(key, value string) error {
+	if DB == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
 	now := time.Now()
 	_, err := DB.Exec(
 		`INSERT INTO app_config (key, value, created_at, updated_at)
@@ -876,24 +968,32 @@ func SetAppConfig(key, value string) error {
 	if err != nil {
 		return fmt.Errorf("设置应用配置失败: %w", err)
 	}
+	appConfigCacheMu.Lock()
+	if appConfigCache == nil {
+		appConfigCache = make(map[string]string)
+	}
+	appConfigCache[key] = value
+	appConfigCacheReady = true
+	appConfigCacheMu.Unlock()
 	return nil
 }
 
-// GetAppConfig 从数据库的 app_config 表获取应用配置。
+// GetAppConfig 从内存缓存读取 app_config（与表同步；关闭库后缓存已清空）。
 // 参数：
 //   - key: 配置键名
 //
 // 返回：配置值和错误（如果未找到或发生错误）
 func GetAppConfig(key string) (string, error) {
-	var value string
-	err := DB.QueryRow("SELECT value FROM app_config WHERE key = ?", key).Scan(&value)
-	if err == sql.ErrNoRows {
+	if err := ensureAppConfigCache(); err != nil {
+		return "", err
+	}
+	appConfigCacheMu.RLock()
+	v, ok := appConfigCache[key]
+	appConfigCacheMu.RUnlock()
+	if !ok {
 		return "", nil
 	}
-	if err != nil {
-		return "", fmt.Errorf("获取应用配置失败: %w", err)
-	}
-	return value, nil
+	return v, nil
 }
 
 // GetAppConfigWithDefault 获取应用配置，如果不存在则返回默认值。

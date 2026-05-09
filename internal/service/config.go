@@ -2,9 +2,11 @@ package service
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/store"
 )
 
@@ -69,11 +71,11 @@ func NewConfigService(store *store.Store) *ConfigService {
 // 返回：主题变体（dark 或 light）
 func (cs *ConfigService) GetTheme() string {
 	if cs.store == nil || cs.store.AppConfig == nil {
-		return "dark"
+		return database.AppConfigBuiltinDefault("theme")
 	}
-	themeStr, err := cs.store.AppConfig.GetWithDefault("theme", "dark")
+	themeStr, err := cs.store.AppConfig.GetWithDefault("theme", database.AppConfigBuiltinDefault("theme"))
 	if err != nil {
-		return "dark"
+		return database.AppConfigBuiltinDefault("theme")
 	}
 	return themeStr
 }
@@ -120,7 +122,7 @@ func (cs *ConfigService) GetLogsCollapsed() bool {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return true // 默认折叠
 	}
-	collapsed, err := cs.store.AppConfig.GetWithDefault("logsCollapsed", "true")
+	collapsed, err := cs.store.AppConfig.GetWithDefault("logsCollapsed", database.AppConfigBuiltinDefault("logsCollapsed"))
 	if err != nil {
 		return true
 	}
@@ -143,8 +145,26 @@ func (cs *ConfigService) SetLogsCollapsed(collapsed bool) error {
 	return cs.store.AppConfig.Set("logsCollapsed", state)
 }
 
+// GetLocalInboundPort 返回本地混合入站端口（xray 监听、系统代理与终端环境变量须与此一致）。
+// 读取 app_config 键 autoProxyPort；无效或缺失时使用 database.DefaultMixedInboundPort。
+func (cs *ConfigService) GetLocalInboundPort() int {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return database.DefaultMixedInboundPort
+	}
+	def := database.AppConfigBuiltinDefault("autoProxyPort")
+	s, err := cs.store.AppConfig.GetWithDefault("autoProxyPort", def)
+	if err != nil {
+		return database.DefaultMixedInboundPort
+	}
+	p, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || p < 1 || p > 65535 {
+		return database.DefaultMixedInboundPort
+	}
+	return p
+}
+
 // GetSystemProxyMode 获取系统代理模式。
-// 返回：系统代理模式（clear, auto, terminal）
+// 返回：系统代理模式（清除系统代理 / 自动配置系统代理）；历史值「环境变量代理」由 UI 迁移为清除模式。
 func (cs *ConfigService) GetSystemProxyMode() string {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return ""
@@ -158,7 +178,7 @@ func (cs *ConfigService) GetSystemProxyMode() string {
 
 // SetSystemProxyMode 设置系统代理模式。
 // 参数：
-//   - mode: 系统代理模式（clear, auto, terminal）
+//   - mode: 系统代理模式（清除系统代理 / 自动配置系统代理）；终端环境变量由 terminalProxyEnabled 等配置单独控制
 //
 // 返回：错误（如果有）
 func (cs *ConfigService) SetSystemProxyMode(mode string) error {
@@ -211,7 +231,7 @@ func (cs *ConfigService) GetDebugPprofEnabled() bool {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return false
 	}
-	v, _ := cs.store.AppConfig.GetWithDefault("debugPprofEnabled", "false")
+	v, _ := cs.store.AppConfig.GetWithDefault("debugPprofEnabled", database.AppConfigBuiltinDefault("debugPprofEnabled"))
 	return v == "true"
 }
 
@@ -232,7 +252,7 @@ func (cs *ConfigService) GetDebugPprofAddr() string {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return "127.0.0.1:6060"
 	}
-	v, _ := cs.store.AppConfig.GetWithDefault("debugPprofAddr", "127.0.0.1:6060")
+	v, _ := cs.store.AppConfig.GetWithDefault("debugPprofAddr", database.AppConfigBuiltinDefault("debugPprofAddr"))
 	if strings.TrimSpace(v) == "" {
 		return "127.0.0.1:6060"
 	}
@@ -256,7 +276,7 @@ func (cs *ConfigService) GetDiagnosticsSamplingSeconds() int {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return defaultDiagnosticsSampleSecs
 	}
-	raw, _ := cs.store.AppConfig.GetWithDefault("diagnosticsSamplingSeconds", fmt.Sprintf("%d", defaultDiagnosticsSampleSecs))
+	raw, _ := cs.store.AppConfig.GetWithDefault("diagnosticsSamplingSeconds", database.AppConfigBuiltinDefault("diagnosticsSamplingSeconds"))
 	switch strings.TrimSpace(raw) {
 	case "1":
 		return 1
@@ -283,7 +303,7 @@ func (cs *ConfigService) GetDiagnosticsDir() string {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return ""
 	}
-	v, _ := cs.store.AppConfig.GetWithDefault("diagnosticsDir", "")
+	v, _ := cs.store.AppConfig.GetWithDefault("diagnosticsDir", database.AppConfigBuiltinDefault("diagnosticsDir"))
 	return strings.TrimSpace(v)
 }
 
@@ -301,7 +321,7 @@ func (cs *ConfigService) GetDirectRoutes() []string {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return nil
 	}
-	raw, err := cs.store.AppConfig.GetWithDefault("directRoutes", "")
+	raw, err := cs.store.AppConfig.GetWithDefault("directRoutes", database.AppConfigBuiltinDefault("directRoutes"))
 	if err != nil || raw == "" {
 		return nil
 	}
@@ -339,7 +359,7 @@ func (cs *ConfigService) GetDirectRoutesUseProxy() bool {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return false
 	}
-	v, _ := cs.store.AppConfig.GetWithDefault("directRoutesUseProxy", "false")
+	v, _ := cs.store.AppConfig.GetWithDefault("directRoutesUseProxy", database.AppConfigBuiltinDefault("directRoutesUseProxy"))
 	return v == "true"
 }
 
@@ -361,7 +381,7 @@ func (cs *ConfigService) GetTerminalProxyEnabled() bool {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return false // 默认不启用
 	}
-	v, _ := cs.store.AppConfig.GetWithDefault("terminalProxyEnabled", "false")
+	v, _ := cs.store.AppConfig.GetWithDefault("terminalProxyEnabled", database.AppConfigBuiltinDefault("terminalProxyEnabled"))
 	return v == "true"
 }
 
@@ -381,13 +401,34 @@ func (cs *ConfigService) SetTerminalProxyEnabled(enabled bool) error {
 	return cs.store.AppConfig.Set("terminalProxyEnabled", val)
 }
 
+// GetGitProxyEnabled 获取是否由本应用写入 Git 全局 http(s).proxy。
+func (cs *ConfigService) GetGitProxyEnabled() bool {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return false
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("gitProxyEnabled", database.AppConfigBuiltinDefault("gitProxyEnabled"))
+	return v == "true"
+}
+
+// SetGitProxyEnabled 设置是否写入 Git 全局代理。
+func (cs *ConfigService) SetGitProxyEnabled(enabled bool) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	val := "false"
+	if enabled {
+		val = "true"
+	}
+	return cs.store.AppConfig.Set("gitProxyEnabled", val)
+}
+
 // GetProxyType 获取代理类型配置。
 // 返回：代理类型（socks5、http、https_tls）；历史值 "https"（实为 HTTP CONNECT）会迁移为 "http"。
 func (cs *ConfigService) GetProxyType() string {
 	if cs.store == nil || cs.store.AppConfig == nil {
 		return "socks5" // 默认使用 socks5
 	}
-	v, _ := cs.store.AppConfig.GetWithDefault("proxyType", "socks5")
+	v, _ := cs.store.AppConfig.GetWithDefault("proxyType", database.AppConfigBuiltinDefault("proxyType"))
 	if v == "https" {
 		_ = cs.store.AppConfig.Set("proxyType", "http")
 		return "http"
