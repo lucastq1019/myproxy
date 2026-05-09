@@ -50,6 +50,16 @@ func (sp *SystemProxy) ClearTerminalProxy() error {
 	return sp.platform.ClearTerminalProxy()
 }
 
+// SetGitProxy 写入 git config --global 的 http/https.proxy（与终端代理使用同一套 URL 规则）。
+func (sp *SystemProxy) SetGitProxy(proxyType string) error {
+	return SetGitGlobalProxy(sp.proxyHost, sp.proxyPort, proxyType)
+}
+
+// ClearGitProxy 清除 git config --global 的 http/https.proxy。
+func (sp *SystemProxy) ClearGitProxy() error {
+	return ClearGitGlobalProxy()
+}
+
 // GetCurrentProxyMode 获取当前代理模式
 func (sp *SystemProxy) GetCurrentProxyMode() ProxyMode {
 	return sp.platform.GetCurrentProxyMode()

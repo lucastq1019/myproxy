@@ -15,6 +15,7 @@ import (
 	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/infra/conf"
 	clog "github.com/xtls/xray-core/common/log"
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/model"
 )
 
@@ -552,9 +553,6 @@ func buildSSStreamSettings(server *model.Node) map[string]interface{} {
 }
 
 // RoutingOptions 路由相关配置（直连列表、直连列表是否走代理等）。
-// DefaultMixedInboundPort 本地混合入站（SOCKS5 + HTTP）默认端口；数值须与 database.DefaultMixedInboundPort 一致。
-const DefaultMixedInboundPort = 10808
-
 type RoutingOptions struct {
 	DirectRoutes         []string // 用户配置的直连列表（domain:xxx 或 ip/cidr）
 	DirectRoutesUseProxy bool     // true：直连列表走代理；false：走直连
@@ -562,13 +560,13 @@ type RoutingOptions struct {
 
 // CreateXrayConfig 创建完整的 xray 配置。
 // 参数：
-//   - localPort: 本地混合入站监听端口（SOCKS5 + HTTP，默认 10808）
+//   - localPort: 本地混合入站监听端口（SOCKS5 + HTTP，为 0 时使用 database.DefaultMixedInboundPort）
 //   - server: 服务器配置，用于创建出站配置
 //   - logFilePath: 日志文件路径（可选，为空则不设置）
 //   - routing: 路由选项（可选，nil 则仅使用内置规则）
 func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, routing *RoutingOptions) ([]byte, error) {
 	if localPort == 0 {
-		localPort = DefaultMixedInboundPort
+		localPort = database.DefaultMixedInboundPort
 	}
 
 	// 创建入站配置：Xray Socks 入站同时接受 SOCKS5 与 HTTP（同一端口）

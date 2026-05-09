@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 
+	"myproxy.com/p/internal/database"
 	"myproxy.com/p/internal/store"
 	"myproxy.com/p/internal/xray"
 )
@@ -70,8 +71,8 @@ func (xcs *XrayControlService) StartProxy(oldInstance *xray.XrayInstance, logFil
 		// 注意：这里不销毁 oldInstance，由调用者负责
 	}
 
-	// 本地混合入站端口与系统/终端代理一致：优先读配置 autoProxyPort，默认见 xray.DefaultMixedInboundPort
-	proxyPort := xray.DefaultMixedInboundPort
+	// 本地混合入站端口与系统/终端代理一致：优先读配置 autoProxyPort，默认见 database.DefaultMixedInboundPort
+	proxyPort := database.DefaultMixedInboundPort
 	if xcs.config != nil {
 		proxyPort = xcs.config.GetLocalInboundPort()
 	}

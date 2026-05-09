@@ -33,7 +33,16 @@ const (
 	smtoAbortIfHung               = 0x0002
 	// 终端环境变量代理使用的 NO_PROXY，避免环回与本地服务误走代理
 	windowsTerminalNoProxy = "localhost,127.0.0.1,::1"
+	// windowsProxyOverrideDefault 与 v2rayN 等工具常用绕过列表一致（分号分隔），含 <local> 以匹配「不对本地地址使用代理」。
+	// 参考：2dust/v2rayN ServiceLib/Handler/SysProxy 及 WinINet INTERNET_PER_CONN_PROXY_BYPASS。
+	windowsProxyOverrideDefault = "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;<local>"
 )
+
+// windowsProxyServerRegistry 生成 WinINet/IE 注册表 ProxyServer 字符串。
+// 须使用「协议=http://主机:端口」形式；仅写 http=host:port 时部分环境会解析失败，表现为仍沿用 v2rayN 等先前写入的配置。
+func windowsProxyServerRegistry(host string, port int) string {
+	return fmt.Sprintf("http=http://%s:%d;https=http://%s:%d;socks=%s:%d", host, port, host, port, host, port)
+}
 
 func newWindowsProxy(host string, port int) *WindowsProxy {
 	return &WindowsProxy{
@@ -55,15 +64,28 @@ func (p *WindowsProxy) ClearSystemProxy() error {
 	}
 	defer key.Close()
 
-	// 禁用代理
+	// 禁用代理，并清空与 v2rayN 等工具共用的键，避免仅关 ProxyEnable 仍残留旧 ProxyServer/PAC
 	if err := key.SetDWordValue("ProxyEnable", 0); err != nil {
 		return fmt.Errorf("禁用代理失败: %v", err)
 	}
-
-	// 清除代理服务器地址（可选，保留原值也可以）
-	// key.DeleteValue("ProxyServer")
+	if err := key.SetStringValue("ProxyServer", ""); err != nil {
+		return fmt.Errorf("清除 ProxyServer 失败: %v", err)
+	}
+	if err := key.SetStringValue("ProxyOverride", ""); err != nil {
+		return fmt.Errorf("清除 ProxyOverride 失败: %v", err)
+	}
+	if err := key.DeleteValue("AutoConfigURL"); err != nil && !isRegistryNotExist(err) {
+		return fmt.Errorf("清除 AutoConfigURL 失败: %v", err)
+	}
 
 	return notifyWindowsProxyChanged()
+}
+
+func isRegistryNotExist(err error) bool {
+	if err == nil {
+		return false
+	}
+	return err == registry.ErrNotExist
 }
 
 // SetSystemProxy 设置 Windows 系统代理
@@ -79,23 +101,23 @@ func (p *WindowsProxy) SetSystemProxy(host string, port int) error {
 	}
 	defer key.Close()
 
-	// 与 macOS 一致：本地入站为 SOCKS5 + HTTP 混合端口，需同时声明 http/https/socks
-	proxyServer := fmt.Sprintf("http=%s:%d;https=%s:%d;socks=%s:%d", host, port, host, port, host, port)
+	// 先关闭 PAC，否则 AutoConfigURL 与手动代理并存时行为依赖系统实现，易表现为仍走旧配置（如与 v2rayN 混用后）
+	if err := key.DeleteValue("AutoConfigURL"); err != nil && !isRegistryNotExist(err) {
+		return fmt.Errorf("清除 AutoConfigURL 失败: %v", err)
+	}
+
+	proxyServer := windowsProxyServerRegistry(host, port)
 	if err := key.SetStringValue("ProxyServer", proxyServer); err != nil {
 		return fmt.Errorf("设置代理服务器地址失败: %v", err)
 	}
 
-	// 启用代理
-	if err := key.SetDWordValue("ProxyEnable", 1); err != nil {
-		return fmt.Errorf("启用代理失败: %v", err)
+	if err := key.SetStringValue("ProxyOverride", windowsProxyOverrideDefault); err != nil {
+		return fmt.Errorf("设置 ProxyOverride 失败: %v", err)
 	}
 
-	// 设置代理覆盖列表（本地地址不使用代理）
-	// 默认值：<local> 表示本地地址不使用代理
-	proxyOverride := "<local>"
-	if err := key.SetStringValue("ProxyOverride", proxyOverride); err != nil {
-		// 这个错误可以忽略，不是必须的
-		_ = err
+	// 最后启用，避免中间状态读到不完整配置
+	if err := key.SetDWordValue("ProxyEnable", 1); err != nil {
+		return fmt.Errorf("启用代理失败: %v", err)
 	}
 
 	return notifyWindowsProxyChanged()

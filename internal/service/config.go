@@ -401,6 +401,27 @@ func (cs *ConfigService) SetTerminalProxyEnabled(enabled bool) error {
 	return cs.store.AppConfig.Set("terminalProxyEnabled", val)
 }
 
+// GetGitProxyEnabled 获取是否由本应用写入 Git 全局 http(s).proxy。
+func (cs *ConfigService) GetGitProxyEnabled() bool {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return false
+	}
+	v, _ := cs.store.AppConfig.GetWithDefault("gitProxyEnabled", database.AppConfigBuiltinDefault("gitProxyEnabled"))
+	return v == "true"
+}
+
+// SetGitProxyEnabled 设置是否写入 Git 全局代理。
+func (cs *ConfigService) SetGitProxyEnabled(enabled bool) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	val := "false"
+	if enabled {
+		val = "true"
+	}
+	return cs.store.AppConfig.Set("gitProxyEnabled", val)
+}
+
 // GetProxyType 获取代理类型配置。
 // 返回：代理类型（socks5、http、https_tls）；历史值 "https"（实为 HTTP CONNECT）会迁移为 "http"。
 func (cs *ConfigService) GetProxyType() string {

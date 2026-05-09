@@ -56,6 +56,7 @@ func (sp *SubscriptionPage) Cleanup() {
 
 // Build 构建订阅管理页面UI
 func (sp *SubscriptionPage) Build() fyne.CanvasObject {
+	pad := innerPadding(sp.appState)
 	// 1. 返回按钮
 	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
 		if sp.appState != nil && sp.appState.MainWindow != nil {
@@ -82,7 +83,7 @@ func (sp *SubscriptionPage) Build() fyne.CanvasObject {
 	// 组合头部区域
 	separatorColor := CurrentThemeColor(sp.appState.App, theme.ColorNameSeparator)
 	headerStack := container.NewVBox(
-		container.NewPadded(headerBar),
+		newPaddedWithSize(headerBar, pad),
 		canvas.NewLine(separatorColor),
 	)
 
@@ -99,7 +100,7 @@ func (sp *SubscriptionPage) Build() fyne.CanvasObject {
 	sp.content = container.NewBorder(
 		headerStack,
 		nil, nil, nil,
-		container.NewPadded(scrollList),
+		newPaddedWithSize(scrollList, pad),
 	)
 
 	return sp.content
@@ -294,7 +295,7 @@ func (card *SubscriptionCard) setupLayout() fyne.CanvasObject {
 		nil, nil,
 		card.statusBar,
 		btnBox,
-		container.NewPadded(textInfo),
+		newPaddedWithSize(textInfo, innerPadding(card.appState)),
 	)
 
 	return container.NewStack(bg, content)

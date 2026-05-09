@@ -530,7 +530,8 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	}
 
 	// 中部：巨大的主开关按钮（居中，更大的尺寸）
-	mainControlArea := container.NewCenter(container.NewPadded(mw.mainToggleButton))
+	pad := innerPadding(mw.appState)
+	mainControlArea := container.NewCenter(newPaddedWithSize(mw.mainToggleButton, pad))
 
 	// 下方：当前节点信息（可点击，跳转到节点选择页面）
 	nodeInfoButton := widget.NewButton("", func() {
@@ -552,13 +553,13 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	// 节点信息区域：占满宽度，留一些边距，添加分隔线提升视觉效果
 	nodeInfoArea := container.NewStack(
 		nodeInfoButton,
-		container.NewPadded(container.NewBorder(
+		newPaddedWithSize(container.NewBorder(
 			widget.NewSeparator(),
 			widget.NewSeparator(),
 			nil,
 			nil,
 			nodeInfoContent,
-		)),
+		), pad),
 	)
 
 	// 模式选择：使用图标和三个按钮，按钮组占90%宽度，Mac 简约风格
@@ -577,24 +578,23 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	buttonGroup.Layout = &proxyModeButtonLayout{}
 
 	// 使用自定义布局：图标10%，按钮组90%
-	modeInfo := container.NewWithoutLayout(iconArea, buttonGroup)
-	modeInfo.Layout = &modeButtonLayout{}
-	modeInfo = container.NewPadded(modeInfo)
+	modeInfoInner := container.NewWithoutLayout(iconArea, buttonGroup)
+	modeInfoInner.Layout = &modeButtonLayout{}
+	modeInfo := newPaddedWithSize(modeInfoInner, pad)
 
 	// 节点和模式信息垂直排列，占满宽度（留一些边距）
-	nodeAndMode := container.NewVBox(
+	nodeAndMode := newCompactVBox(pad,
 		nodeInfoArea,
 		modeInfo,
 	)
-	nodeAndMode = container.NewPadded(nodeAndMode)
 
 	// 底部：实时流量图
 	if mw.trafficChart == nil {
 		mw.trafficChart = NewTrafficChart(mw.appState)
 	}
-	trafficArea := container.NewPadded(mw.trafficChart)
+	trafficArea := newPaddedWithSize(mw.trafficChart, pad)
 
-	// 整体垂直排版（减少顶部留白，整体往上移动）
+	// 整体垂直排版（减少顶部留白，整体往上移动）；此处保留 VBox 以便 Spacer 正确吃掉剩余高度。
 	content := container.NewVBox(
 		mainControlArea,
 		nodeAndMode,
@@ -612,14 +612,14 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	headerButtons := container.NewHBox(
 		mw.homeLogoIcon,
 		layout.NewSpacer(),
-		NewButtonWithIcon("订阅", theme.StorageIcon(), func() {
+		widget.NewButtonWithIcon("订阅", theme.StorageIcon(), func() {
 			mw.ShowSubscriptionPage()
 		}),
-		NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
+		widget.NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
 			mw.ShowSettingsPage()
 		}),
 	)
-	headerBar := container.NewPadded(headerButtons)
+	headerBar := newPaddedWithSize(headerButtons, pad)
 
 	return container.NewBorder(
 		headerBar,
@@ -642,6 +642,22 @@ func wrapPageWithBackground(content fyne.CanvasObject, app fyne.App) fyne.Canvas
 	return container.NewStack(bgRect, content)
 }
 
+// setWrappedWindowContent 切换窗口内容并保持当前用户调整后的窗口尺寸（各页面统一，不随内容最小尺寸回退到配置里的旧值）。
+func (mw *MainWindow) setWrappedWindowContent(pageContent fyne.CanvasObject) {
+	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
+		return
+	}
+	w := mw.appState.Window
+	defaultSize := fyne.NewSize(420, 520)
+	cur := w.Canvas().Size()
+	if cur.Width < 200 || cur.Height < 200 {
+		cur = mw.appState.LoadWindowSize(defaultSize)
+	}
+	w.SetContent(wrapPageWithBackground(pageContent, mw.appState.App))
+	w.Resize(cur)
+	mw.appState.SaveWindowSize(cur)
+}
+
 // showPage 通用的页面切换方法，会将当前页面压入栈，然后切换到新页面
 func (mw *MainWindow) showPage(pageType PageType, pageContent fyne.CanvasObject, pushCurrent bool) {
 	if mw == nil || mw.appState == nil || mw.appState.Window == nil {
@@ -656,13 +672,7 @@ func (mw *MainWindow) showPage(pageType PageType, pageContent fyne.CanvasObject,
 	// 更新当前页面类型
 	mw.currentPage = pageType
 
-	mw.appState.Window.SetContent(wrapPageWithBackground(pageContent, mw.appState.App))
-
-	// 从配置读取窗口大小并应用（在 SetContent 之后，避免内容最小尺寸导致窗口变大）
-	defaultSize := fyne.NewSize(420, 520)
-	windowSize := mw.appState.LoadWindowSize(defaultSize)
-	mw.appState.Window.Resize(windowSize)
-	mw.appState.SaveWindowSize(windowSize)
+	mw.setWrappedWindowContent(pageContent)
 }
 
 // Back 返回到上一个页面（从路由栈中弹出）
@@ -770,12 +780,12 @@ func (mw *MainWindow) RebuildCurrentPageForTheme() {
 	case PageTypeSettings:
 		if mw.settingsPageInstance != nil {
 			mw.settingsPage = mw.settingsPageInstance.Build()
-			mw.appState.Window.SetContent(wrapPageWithBackground(mw.settingsPage, mw.appState.App))
+			mw.setWrappedWindowContent(mw.settingsPage)
 		}
 		mw.homePage = nil
 	case PageTypeHome:
 		mw.homePage = mw.buildHomePage()
-		mw.appState.Window.SetContent(wrapPageWithBackground(mw.homePage, mw.appState.App))
+		mw.setWrappedWindowContent(mw.homePage)
 	default:
 		mw.homePage = nil
 		if c := mw.appState.Window.Canvas().Content(); c != nil {
@@ -915,10 +925,10 @@ func (mw *MainWindow) startProxy() {
 		mw.nodePageInstance.Refresh()
 	}
 
-	// 入站端口就绪后同步系统代理与终端环境变量（不写回 Store）；终端仅在与「系统」模式同时启用时写入
+	// 入站端口就绪后同步系统代理、终端环境变量与 Git 全局代理（不写回 Store）；后两者仅在与「系统」模式同时勾选时写入
 	if mw.appState.ConfigService != nil {
 		persisted := ParseSystemProxyMode(mw.appState.ConfigService.GetSystemProxyMode())
-		if persisted == SystemProxyModeAuto && mw.appState.ConfigService.GetTerminalProxyEnabled() {
+		if persisted == SystemProxyModeAuto && (mw.appState.ConfigService.GetTerminalProxyEnabled() || mw.appState.ConfigService.GetGitProxyEnabled()) {
 			_ = mw.applySystemProxyModeCore(SystemProxyModeAuto, false)
 		}
 	}
@@ -1080,13 +1090,16 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 	}
 
 	// 获取当前代理端口（运行中以 xray 为准，否则与配置 autoProxyPort 一致）
-	proxyPort := database.DefaultMixedInboundPort
+	configPort := database.DefaultMixedInboundPort
 	if mw.appState != nil && mw.appState.ConfigService != nil {
-		proxyPort = mw.appState.ConfigService.GetLocalInboundPort()
+		configPort = mw.appState.ConfigService.GetLocalInboundPort()
 	}
-	if mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
+	proxyPort := configPort
+	xrayOverrode := false
+	if mw.appState != nil && mw.appState.XrayInstance != nil && mw.appState.XrayInstance.IsRunning() {
 		if port := mw.appState.XrayInstance.GetPort(); port > 0 {
 			proxyPort = port
+			xrayOverrode = true
 		}
 	}
 
@@ -1097,59 +1110,85 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 		mw.systemProxy.UpdateProxy("127.0.0.1", proxyPort)
 	}
 
+	// 系统代理 / 终端环境变量链路：注册表与 HTTP_PROXY 等均使用下方 proxyPort
+	if mode == SystemProxyModeAuto {
+		chainMsg := fmt.Sprintf("系统代理链路: 写入端口=%d（app_config.autoProxyPort 解析=%d; xray.GetPort 覆盖=%t）",
+			proxyPort, configPort, xrayOverrode)
+		mw.appState.AppendLog("INFO", "app", chainMsg)
+		if mw.appState.Logger != nil {
+			mw.appState.Logger.InfoWithType(logging.LogTypeApp, "%s", chainMsg)
+		}
+	}
+
 	var err error
 	var logMessage string
 
 	switch mode {
 	case SystemProxyModeClear:
 		err = mw.systemProxy.ClearSystemProxy()
-		// 根据设置页面的配置决定是否清除终端代理
 		shouldClearTerminal := false
+		shouldClearGit := false
 		if mw.appState != nil && mw.appState.ConfigService != nil {
 			shouldClearTerminal = mw.appState.ConfigService.GetTerminalProxyEnabled()
+			shouldClearGit = mw.appState.ConfigService.GetGitProxyEnabled()
+		}
+		if err == nil {
+			logMessage = "已清除系统代理设置"
+		} else {
+			logMessage = fmt.Sprintf("清除系统代理失败: %v", err)
 		}
 		if shouldClearTerminal {
 			terminalErr := mw.systemProxy.ClearTerminalProxy()
-			if err == nil && terminalErr == nil {
-				logMessage = "已清除系统代理设置和环境变量代理"
-			} else if err != nil && terminalErr != nil {
-				logMessage = fmt.Sprintf("清除系统代理失败: %v; 清除环境变量代理失败: %v", err, terminalErr)
-				err = fmt.Errorf("清除失败: %v; %v", err, terminalErr)
-			} else if err != nil {
-				logMessage = fmt.Sprintf("清除系统代理失败: %v; 已清除环境变量代理", err)
+			if terminalErr != nil {
+				logMessage += fmt.Sprintf("；清除环境变量代理失败: %v", terminalErr)
+				if err == nil {
+					err = terminalErr
+				}
 			} else {
-				logMessage = fmt.Sprintf("已清除系统代理设置; 清除环境变量代理失败: %v", terminalErr)
-				err = terminalErr
+				logMessage += "；已清除环境变量代理"
 			}
-		} else {
-			if err == nil {
-				logMessage = "已清除系统代理设置"
+		}
+		if shouldClearGit {
+			gitErr := mw.systemProxy.ClearGitProxy()
+			if gitErr != nil {
+				logMessage += fmt.Sprintf("；清除 Git 代理失败: %v", gitErr)
+				if err == nil {
+					err = gitErr
+				}
 			} else {
-				logMessage = fmt.Sprintf("清除系统代理失败: %v", err)
+				logMessage += "；已清除 Git 全局代理"
 			}
 		}
 
 	case SystemProxyModeAuto:
 		_ = mw.systemProxy.ClearSystemProxy()
-		// 根据设置页面的配置决定是否设置终端代理
 		shouldSetTerminal := false
+		shouldSetGit := false
 		if mw.appState != nil && mw.appState.ConfigService != nil {
 			shouldSetTerminal = mw.appState.ConfigService.GetTerminalProxyEnabled()
+			shouldSetGit = mw.appState.ConfigService.GetGitProxyEnabled()
 		}
 		err = mw.systemProxy.SetSystemProxy()
 		if err == nil {
 			logMessage = fmt.Sprintf("已自动配置系统代理: 127.0.0.1:%d", proxyPort)
+			proxyType := "socks5"
+			if mw.appState != nil && mw.appState.ConfigService != nil {
+				proxyType = mw.appState.ConfigService.GetProxyType()
+			}
 			if shouldSetTerminal {
-				// 获取代理类型
-				proxyType := "socks5"
-				if mw.appState != nil && mw.appState.ConfigService != nil {
-					proxyType = mw.appState.ConfigService.GetProxyType()
-				}
 				terminalErr := mw.systemProxy.SetTerminalProxy(proxyType)
 				if terminalErr == nil {
 					logMessage += "；已设置环境变量代理"
 				} else {
 					logMessage += fmt.Sprintf("；设置环境变量代理失败: %v", terminalErr)
+				}
+			}
+			if shouldSetGit {
+				gitErr := mw.systemProxy.SetGitProxy(proxyType)
+				if gitErr == nil {
+					logMessage += "；已设置 Git 全局代理"
+				} else {
+					logMessage += fmt.Sprintf("；设置 Git 全局代理失败: %v", gitErr)
 				}
 			}
 		} else {
@@ -1293,9 +1332,9 @@ func (mw *MainWindow) applySystemProxyModeWithoutSave(mode SystemProxyMode) erro
 	return mw.applySystemProxyModeCore(mode, false)
 }
 
-// ReapplyPersistedSystemProxyFromConfig 按数据库中已保存的模式重新应用系统代理与终端环境变量（不写回 Store）。
-// 终端代理仅为设置项：仅在当前持久化模式为「自动配置系统代理」时生效。
-// 用于设置页变更代理类型或「终端代理」勾选后，与主页「系统」模式立即同步。
+// ReapplyPersistedSystemProxyFromConfig 按数据库中已保存的模式重新应用系统代理、终端环境变量与 Git 全局代理（不写回 Store）。
+// 终端 / Git 仅为设置项：仅在当前持久化模式为「自动配置系统代理」时生效。
+// 用于设置页变更代理类型或相关勾选后，与主页「系统」模式立即同步。
 func (mw *MainWindow) ReapplyPersistedSystemProxyFromConfig() error {
 	if mw.appState == nil || mw.appState.ConfigService == nil {
 		return nil

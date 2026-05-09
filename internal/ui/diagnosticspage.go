@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -42,7 +43,7 @@ func (dp *DiagnosticsPage) Build() fyne.CanvasObject {
 		return dp.content
 	}
 
-	spacing := dp.getInnerPadding()
+	spacing := innerPadding(dp.appState)
 	dp.overviewLabel = widget.NewLabel("")
 	dp.overviewLabel.Wrapping = fyne.TextWrapWord
 	dp.exportLabel = widget.NewLabel("")
@@ -108,6 +109,52 @@ func (dp *DiagnosticsPage) Build() fyne.CanvasObject {
 	dp.gorChart = NewMetricChart(dp.appState, "Goroutine 趋势", ChartDownloadColor(dp.appState.App))
 	dp.pprofCheck.SetChecked(pprofEnabled)
 	dp.samplingSel.SetSelected(samplingSeconds)
+
+	browserRow := container.NewGridWithColumns(3,
+		widget.NewButtonWithIcon("浏览器：pprof 首页", theme.ComputerIcon(), func() {
+			if dp.appState == nil || dp.appState.DiagnosticsService == nil {
+				return
+			}
+			raw, err := dp.appState.DiagnosticsService.PprofIndexPageURL()
+			dp.openPprofURL(raw, err)
+		}),
+		widget.NewButtonWithIcon("浏览器：堆内存(文本)", theme.DocumentIcon(), func() {
+			if dp.appState == nil || dp.appState.DiagnosticsService == nil {
+				return
+			}
+			raw, err := dp.appState.DiagnosticsService.PprofHeapTextURL()
+			dp.openPprofURL(raw, err)
+		}),
+		widget.NewButtonWithIcon("浏览器：交互+火焰图", theme.ViewFullScreenIcon(), func() {
+			if dp.appState == nil || dp.appState.DiagnosticsService == nil {
+				return
+			}
+			dp.setExportStatus("正在启动 go tool pprof...")
+			go func() {
+				viewerURL, err := dp.appState.DiagnosticsService.StartGoToolPprofHeapWebViewer()
+				fyne.Do(func() {
+					if err != nil {
+						dp.showError(err)
+						dp.setExportStatus(err.Error())
+						return
+					}
+					u, perr := url.Parse(viewerURL)
+					if perr != nil {
+						dp.showError(perr)
+						return
+					}
+					if dp.appState.App == nil {
+						return
+					}
+					if err := dp.appState.App.OpenURL(u); err != nil {
+						dp.showError(err)
+						return
+					}
+					dp.setExportStatus("已在浏览器打开交互式剖面: " + viewerURL)
+				})
+			}()
+		}),
+	)
 
 	buttonsRow1 := container.NewGridWithColumns(2,
 		widget.NewButtonWithIcon("导出堆快照", theme.DownloadIcon(), func() {
@@ -182,6 +229,8 @@ func (dp *DiagnosticsPage) Build() fyne.CanvasObject {
 		container.NewBorder(nil, nil, nil, savePprofBtn, dp.pprofAddr),
 		widget.NewLabel("采样周期"),
 		dp.samplingSel,
+		widget.NewLabelWithStyle("浏览器调试（需已启用 pprof；火焰图需本机安装 Go）", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		browserRow,
 	)
 
 	overviewCard := container.NewVBox(
@@ -191,7 +240,7 @@ func (dp *DiagnosticsPage) Build() fyne.CanvasObject {
 		dp.exportLabel,
 	)
 
-	content := container.NewVBox(
+	content := newCompactVBox(spacing,
 		configCard,
 		widget.NewSeparator(),
 		overviewCard,
@@ -290,6 +339,28 @@ func (dp *DiagnosticsPage) currentSummary() model.DiagnosticSummary {
 	return dp.appState.DiagnosticsService.GetSummary(proxyRunning, proxyPort, serverName)
 }
 
+// openPprofURL 在系统默认浏览器中打开诊断相关 URL（raw 为完整 http(s) 地址）。
+func (dp *DiagnosticsPage) openPprofURL(raw string, err error) {
+	if err != nil {
+		dp.showError(err)
+		return
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		dp.showError(err)
+		return
+	}
+	if dp.appState == nil || dp.appState.App == nil {
+		dp.showError(fmt.Errorf("应用未就绪"))
+		return
+	}
+	if err := dp.appState.App.OpenURL(u); err != nil {
+		dp.showError(err)
+		return
+	}
+	dp.setExportStatus("已在浏览器打开: " + raw)
+}
+
 func (dp *DiagnosticsPage) runAsyncAction(startText string, fn func() (string, error)) {
 	dp.setExportStatus(startText)
 	go func() {
@@ -325,13 +396,6 @@ func (dp *DiagnosticsPage) setExportStatusIfEmpty(message string) {
 	if dp.exportLabel != nil && strings.TrimSpace(dp.exportLabel.Text) == "" {
 		dp.exportLabel.SetText(message)
 	}
-}
-
-func (dp *DiagnosticsPage) getInnerPadding() float32 {
-	if dp.appState != nil && dp.appState.App != nil {
-		return dp.appState.App.Settings().Theme().Size(theme.SizeNameInnerPadding)
-	}
-	return theme.DefaultTheme().Size(theme.SizeNameInnerPadding)
 }
 
 func formatDiagnosticSummary(summary model.DiagnosticSummary) string {

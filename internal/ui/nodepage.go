@@ -81,6 +81,7 @@ func (np *NodePage) loadNodes() {
 // Build 构建并返回服务器列表面板的 UI 组件。
 // 返回：包含返回按钮、操作按钮和服务器列表的容器组件
 func (np *NodePage) Build() fyne.CanvasObject {
+	pad := innerPadding(np.appState)
 	// 1. 返回按钮
 	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
 		if np.appState != nil && np.appState.MainWindow != nil {
@@ -110,7 +111,7 @@ func (np *NodePage) Build() fyne.CanvasObject {
 
 	// 4. 头部栏布局（返回按钮 + 选中服务器标签 + 操作按钮）
 	// 使用 Border 布局让 labelContainer 自动占满剩余空间
-	labelContainer := container.NewPadded(np.selectedServerLabel)
+	labelContainer := newPaddedWithSize(np.selectedServerLabel, pad)
 	rightButtons := container.NewHBox(testAllBtn, subscriptionBtn)
 	headerBar := container.NewBorder(
 		nil, nil, // 上下为空
@@ -201,7 +202,7 @@ func (np *NodePage) Build() fyne.CanvasObject {
 			canvas.NewLine(separatorColor),
 		),
 		nil, nil, nil,
-		container.NewPadded(np.scrollList),
+		newPaddedWithSize(np.scrollList, pad),
 	)
 
 	return np.content
@@ -882,7 +883,7 @@ func (s *ServerListItem) setupLayout() fyne.CanvasObject {
 	// 使用 Stack 布局：背景 + 内容
 	// 移除 padding，删除列表项之间的间距
 	// 使用 Padded 确保内容区域可点击
-	return container.NewStack(s.bgRect, container.NewPadded(content))
+	return container.NewStack(s.bgRect, newPaddedWithSize(content, innerPadding(s.appState)))
 }
 
 // MinSize 返回列表项的最小尺寸（设置行高为52px，符合UI改进建议：48-56px）
