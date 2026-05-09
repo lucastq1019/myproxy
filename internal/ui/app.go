@@ -17,21 +17,22 @@ import (
 )
 
 type AppState struct {
-	initialized bool
-	Ping       *utils.Ping
-	Logger     *logging.Logger
-	SafeLogger *logging.SafeLogger
-	App        fyne.App
-	Window     fyne.Window
-	MainWindow *MainWindow
-	TrayManager *TrayManager
-	Store      *store.Store
+	initialized         bool
+	Ping                *utils.Ping
+	Logger              *logging.Logger
+	SafeLogger          *logging.SafeLogger
+	App                 fyne.App
+	Window              fyne.Window
+	MainWindow          *MainWindow
+	TrayManager         *TrayManager
+	Store               *store.Store
 	ServerService       *service.ServerService
 	ConfigService       *service.ConfigService
 	ProxyService        *service.ProxyService
 	SubscriptionService *service.SubscriptionService
-	XrayControlService   *service.XrayControlService
+	XrayControlService  *service.XrayControlService
 	AccessRecordService *service.AccessRecordService
+	DiagnosticsService  *service.DiagnosticsService
 	XrayInstance        *xray.XrayInstance
 	LogsPanel           *LogsPanel // 日志面板，仅设置页使用；OnLogLine 分发到此
 	ProxyStatusBinding  binding.String
@@ -62,9 +63,10 @@ func NewAppState() *AppState {
 		ProxyStatusBinding:  dataStore.ProxyStatus.ProxyStatusBinding,
 		PortBinding:         dataStore.ProxyStatus.PortBinding,
 		ServerNameBinding:   dataStore.ProxyStatus.ServerNameBinding,
-		ProxyService:         service.NewProxyService(nil, configService),
-		XrayControlService:   service.NewXrayControlService(dataStore, configService, nil, nil),
-		AccessRecordService:  service.NewAccessRecordService(dataStore),
+		ProxyService:        service.NewProxyService(nil, configService),
+		XrayControlService:  service.NewXrayControlService(dataStore, configService, nil, nil),
+		AccessRecordService: service.NewAccessRecordService(dataStore),
+		DiagnosticsService:  service.NewDiagnosticsService(configService, dataStore),
 	}
 
 	// LogCallback 保留用于兼容，但展示已改为通过 OnLogLine 统一分发
@@ -223,6 +225,12 @@ func (a *AppState) Startup() error {
 		return fmt.Errorf("应用状态: 初始化应用失败: %w", err)
 	}
 
+	if a.DiagnosticsService != nil {
+		if err := a.DiagnosticsService.Start(); err != nil {
+			return fmt.Errorf("应用状态: 启动诊断服务失败: %w", err)
+		}
+	}
+
 	// 创建日志面板并设置 OnLogLine，需在 InitLogger 之前完成
 	a.LogsPanel = NewLogsPanel(a)
 	a.OnLogLine = func(logLine string) {
@@ -311,6 +319,16 @@ func (a *AppState) autoLoadProxyConfig() error {
 }
 
 func (a *AppState) Cleanup() {
+	if a.MainWindow != nil {
+		a.MainWindow.Cleanup()
+		a.MainWindow = nil
+	}
+
+	if a.LogsPanel != nil {
+		a.LogsPanel.Stop()
+		a.LogsPanel = nil
+	}
+
 	if a.XrayInstance != nil {
 		if a.XrayInstance.IsRunning() {
 			_ = a.XrayInstance.Stop()
@@ -333,6 +351,10 @@ func (a *AppState) Cleanup() {
 
 	if a.ProxyService != nil {
 		a.ProxyService.UpdateXrayInstance(nil)
+	}
+
+	if a.DiagnosticsService != nil {
+		a.DiagnosticsService.Stop()
 	}
 }
 

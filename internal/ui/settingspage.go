@@ -22,6 +22,7 @@ const (
 	SettingsMenuDirectRoute
 	SettingsMenuLog
 	SettingsMenuAccessRecord
+	SettingsMenuDiagnostics
 	SettingsMenuAbout
 )
 
@@ -51,6 +52,8 @@ func (m SettingsMenu) String() string {
 		return "日志"
 	case SettingsMenuAccessRecord:
 		return "访问记录"
+	case SettingsMenuDiagnostics:
+		return "诊断"
 	case SettingsMenuAbout:
 		return "关于"
 	default:
@@ -100,7 +103,7 @@ func (f fixedMenuContentLayout) Layout(objects []fyne.CanvasObject, size fyne.Si
 type SettingsPage struct {
 	appState    *AppState
 	content     fyne.CanvasObject
-	menuButtons [5]*widget.Button
+	menuButtons [6]*widget.Button
 	contentCard *fyne.Container
 	currentMenu SettingsMenu
 
@@ -112,6 +115,9 @@ type SettingsPage struct {
 
 	// 日志：在设置页「日志」菜单中复用，用于查看日志
 	logsPanel *LogsPanel
+
+	// 诊断页
+	diagnosticsPage *DiagnosticsPage
 
 	// 访问记录相关
 	accessRecordsList *widget.List
@@ -149,7 +155,8 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	sp.menuButtons[1] = widget.NewButton("代理配置", func() { sp.switchMenu(SettingsMenuDirectRoute) })
 	sp.menuButtons[2] = widget.NewButton("日志", func() { sp.switchMenu(SettingsMenuLog) })
 	sp.menuButtons[3] = widget.NewButton("访问记录", func() { sp.switchMenu(SettingsMenuAccessRecord) })
-	sp.menuButtons[4] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
+	sp.menuButtons[4] = widget.NewButton("诊断", func() { sp.switchMenu(SettingsMenuDiagnostics) })
+	sp.menuButtons[5] = widget.NewButton("关于", func() { sp.switchMenu(SettingsMenuAbout) })
 
 	for i := range sp.menuButtons {
 		sp.menuButtons[i].Importance = widget.LowImportance
@@ -162,6 +169,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 		sp.menuButtons[2],
 		sp.menuButtons[3],
 		sp.menuButtons[4],
+		sp.menuButtons[5],
 	)
 	menuBox := container.NewPadded(menuContent)
 	// 极简柔光：浅色模式下侧边栏背景 #F1F5F9，增加物理隔离感
@@ -180,7 +188,7 @@ func (sp *SettingsPage) Build() fyne.CanvasObject {
 	contentArea := container.NewScroll(container.NewPadded(sp.contentCard))
 
 	// 左右分栏：菜单固定宽度，完整展示菜单项；内容区占剩余空间（分隔不随窗口拖拽变化）
-	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 140}, leftColumn, contentArea)
+	mainContent := container.New(&fixedMenuContentLayout{menuWidth: 98}, leftColumn, contentArea)
 
 	sp.content = container.NewBorder(
 		headerBar,
@@ -205,6 +213,8 @@ func (sp *SettingsPage) switchMenu(menu SettingsMenu) {
 		sp.contentCard.Add(sp.buildLogContent())
 	case SettingsMenuAccessRecord:
 		sp.contentCard.Add(sp.buildAccessRecordContent())
+	case SettingsMenuDiagnostics:
+		sp.contentCard.Add(sp.buildDiagnosticsContent())
 	case SettingsMenuAbout:
 		sp.contentCard.Add(sp.buildAboutContent())
 	}
@@ -353,8 +363,8 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		terminalProxyCheck.SetChecked(sp.appState.ConfigService.GetTerminalProxyEnabled())
 	}
 
-	// 代理类型选择
-	proxyTypeOptions := []string{"socks5", "https"}
+	// 代理类型：http = 明文 HTTP 代理（CONNECT）；https_tls = 与代理之间 TLS（https://）
+	proxyTypeOptions := []string{"socks5", "http", "https_tls"}
 	proxyTypeSelect := widget.NewSelect(proxyTypeOptions, func(s string) {
 		if sp.appState != nil && sp.appState.ConfigService != nil {
 			_ = sp.appState.ConfigService.SetProxyType(s)
@@ -364,6 +374,8 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		proxyTypeSelect.SetSelected(sp.appState.ConfigService.GetProxyType())
 	}
 	proxyTypeLabel := widget.NewLabel("代理类型")
+	proxyTypeHint := widget.NewLabel("http：CONNECT（含 HTTPS 站点）；https_tls：代理地址为 https://（需代理端 TLS）")
+	proxyTypeHint.Wrapping = fyne.TextWrapWord
 
 	// 代理配置区域：包含"终端代理"标题、"不走直连"、"重置"按钮
 	proxyConfigArea := container.NewVBox(
@@ -371,6 +383,7 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 		container.NewVBox(
 			proxyTypeLabel,
 			proxyTypeSelect,
+			proxyTypeHint,
 		),
 		widget.NewSeparator(),
 		container.NewHBox(sp.routeUseProxy, resetBtn, layout.NewSpacer()),
@@ -561,6 +574,21 @@ func (sp *SettingsPage) buildLogContent() fyne.CanvasObject {
 	return sp.logsPanel.Build()
 }
 
+func (sp *SettingsPage) buildDiagnosticsContent() fyne.CanvasObject {
+	if sp.diagnosticsPage == nil {
+		sp.diagnosticsPage = NewDiagnosticsPage(sp.appState)
+	}
+	return sp.diagnosticsPage.Build()
+}
+
+// Cleanup 释放设置页资源。
+func (sp *SettingsPage) Cleanup() {
+	if sp.diagnosticsPage != nil {
+		sp.diagnosticsPage.Cleanup()
+		sp.diagnosticsPage = nil
+	}
+}
+
 // buildAccessRecordContent 构建设置「访问记录」内容区，展示访问的网站及累计访问次数。
 func (sp *SettingsPage) buildAccessRecordContent() fyne.CanvasObject {
 	sp.loadAccessRecords()
@@ -569,11 +597,14 @@ func (sp *SettingsPage) buildAccessRecordContent() fyne.CanvasObject {
 		func() int { return len(sp.accessRecordsData) },
 		func() fyne.CanvasObject {
 			addrLabel := widget.NewLabel("")
-			addrLabel.Wrapping = fyne.TextWrapWord // 宽度过宽时自动换行
+			addrLabel.Wrapping = fyne.TextWrapOff
+			addrLabel.Truncation = fyne.TextTruncateEllipsis
 			countLabel := widget.NewLabel("")
-			return container.NewVBox(
+			countLabel.Alignment = fyne.TextAlignTrailing
+			return container.NewBorder(
+				nil, nil, nil,
+				countLabel,
 				addrLabel,
-				container.NewHBox(layout.NewSpacer(), countLabel),
 			)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
@@ -669,20 +700,24 @@ func collectLabelsFromObject(obj fyne.CanvasObject) []*widget.Label {
 func (sp *SettingsPage) buildAboutContent() fyne.CanvasObject {
 	titleLabel := widget.NewLabelWithStyle("关于", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
-	versionLabel := widget.NewLabel("myproxy  版本 1.0.0")
-	versionLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
+	versionLabel := widget.NewLabel("myproxy")
+	versionLabel.Wrapping = fyne.TextWrapWord
 
-	descLabel := widget.NewLabel("轻量级代理管理工具，基于 Xray-core 与 Fyne")
-	descLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
+	descLabel := widget.NewLabel("基于 Xray-core 与 Fyne 的桌面代理管理工具。")
+	descLabel.Wrapping = fyne.TextWrapWord
 
-	emailLabel := widget.NewLabel("邮箱: lucastq1019@gmail.com")
-	emailLabel.Wrapping = fyne.TextWrapWord // 启用自动换行，适配窄屏显示
+	featureLabel := widget.NewLabel("提供节点切换、订阅管理、系统代理、访问记录与运行诊断等功能。")
+	featureLabel.Wrapping = fyne.TextWrapWord
+
+	emailLabel := widget.NewLabel("联系邮箱: lucastq1019@gmail.com")
+	emailLabel.Wrapping = fyne.TextWrapWord
 
 	return container.NewVBox(
 		titleLabel,
 		widget.NewSeparator(),
 		versionLabel,
 		descLabel,
+		featureLabel,
 		emailLabel,
 	)
 }

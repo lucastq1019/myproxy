@@ -1,5 +1,6 @@
 # 数据库文件
 data/myproxy.db
+data/diagnostics/
 myproxy.db
 *.db
 

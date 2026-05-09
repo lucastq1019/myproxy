@@ -185,13 +185,20 @@ func createTables() error {
 func InitDefaultConfig() error {
 	// 定义默认配置（硬编码，避免暴露）
 	defaultConfigs := map[string]string{
-		"logLevel":               "info",        // 日志级别：info（生产环境默认）
-		"logFile":                "myproxy.log", // 日志文件
-		"theme":                  "dark",        // 主题：dark（默认黑色主题）
-		"autoProxyEnabled":       "false",       // 自动代理：默认关闭
-		"autoProxyPort":          "1080",        // 自动代理端口：默认1080
-		"selectedServerID":       "",            // 选中的服务器ID：默认空
-		"selectedSubscriptionID": "0",           // 选中的订阅ID：默认0（全部）
+		"logLevel":                   "info",        // 日志级别：info（生产环境默认）
+		"logFile":                    "myproxy.log", // 日志文件
+		"theme":                      "dark",        // 主题：dark（默认黑色主题）
+		"autoProxyEnabled":           "false",       // 自动代理：默认关闭
+		"autoProxyPort":              "1080",        // 自动代理端口：默认1080
+		"selectedServerID":           "",            // 选中的服务器ID：默认空
+		"selectedSubscriptionID":     "0",           // 选中的订阅ID：默认0（全部）
+		"debugPprofEnabled":          "false",
+		"debugPprofAddr":             "127.0.0.1:6060",
+		"diagnosticsSamplingSeconds": "5",
+		"diagnosticsDir":             "",
+		"lastNodeSwitchAt":           "",
+		"lastSubscriptionUpdateAt":   "",
+		"lastDiagnosticExport":       "",
 	}
 
 	// 遍历默认配置，如果不存在则写入

@@ -24,6 +24,7 @@ type NodePage struct {
 	list       *widget.List      // 列表组件
 	scrollList *container.Scroll // 滚动容器
 	content    fyne.CanvasObject // 内容容器
+	listener   binding.DataListener
 
 	// 搜索与过滤相关
 	searchEntry *widget.Entry // 节点搜索输入框
@@ -41,16 +42,26 @@ func NewNodePage(appState *AppState) *NodePage {
 
 	// 监听 Store 的节点绑定数据变化，自动刷新列表
 	if appState != nil && appState.Store != nil && appState.Store.Nodes != nil {
-		appState.Store.Nodes.NodesBinding.AddListener(binding.NewDataListener(func() {
+		np.listener = binding.NewDataListener(func() {
 			if np.list != nil {
 				np.list.Refresh()
 				// 数据更新后，尝试滚动到选中位置
 				np.scrollToSelected()
 			}
-		}))
+		})
+		appState.Store.Nodes.NodesBinding.AddListener(np.listener)
 	}
 
 	return np
+}
+
+// Cleanup 释放页面持有的监听器，避免重复建页时旧实例被 binding 持有。
+func (np *NodePage) Cleanup() {
+	if np == nil || np.listener == nil || np.appState == nil || np.appState.Store == nil || np.appState.Store.Nodes == nil {
+		return
+	}
+	np.appState.Store.Nodes.NodesBinding.RemoveListener(np.listener)
+	np.listener = nil
 }
 
 // loadNodes 从 Store 加载节点（Store 已经维护了绑定，这里只是确保数据最新）
@@ -811,15 +822,15 @@ type ServerListItem struct {
 	id          widget.ListItemID
 	panel       *NodePage
 	appState    *AppState
-	renderObj   fyne.CanvasObject  // 渲染对象
-	bgRect      *canvas.Rectangle  // 背景矩形（用于动态改变颜色）
+	renderObj   fyne.CanvasObject // 渲染对象
+	bgRect      *canvas.Rectangle // 背景矩形（用于动态改变颜色）
 	regionLabel *widget.Label
 	nameLabel   *widget.Label
-	delayText   *canvas.Text       // 延迟列（按 50/150ms 阈值着色）
-	statusIcon  *widget.Icon       // 在线/离线状态图标
-	menuButton  *widget.Button    // 右侧"..."菜单按钮
-	isSelected  bool              // 是否选中
-	isConnected bool              // 是否当前连接
+	delayText   *canvas.Text   // 延迟列（按 50/150ms 阈值着色）
+	statusIcon  *widget.Icon   // 在线/离线状态图标
+	menuButton  *widget.Button // 右侧"..."菜单按钮
+	isSelected  bool           // 是否选中
+	isConnected bool           // 是否当前连接
 }
 
 // NewServerListItem 创建新的服务器列表项

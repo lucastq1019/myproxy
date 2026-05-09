@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -330,9 +331,9 @@ type MainWindow struct {
 
 	homeLogoIcon *widget.Icon // 主页logo图标，用于主题变化时更新
 
-	// 主界面状态UI组件（使用双向绑定）
+	// 主界面状态UI组件
 	mainToggleButton *CircularButton          // 主开关按钮（连接/断开，圆形，替代了状态显示）
-	serverNameLabel  *widget.Label            // 服务器名称标签（绑定到 ServerNameBinding）
+	serverNameLabel  *widget.Label            // 服务器名称标签
 	proxyModeButtons [2]*widget.Button        // 系统代理模式按钮组（清除、系统）
 	systemProxy      *systemproxy.SystemProxy // 系统代理管理器
 	trafficChart     *TrafficChart            // 实时流量图组件
@@ -413,6 +414,19 @@ func (mw *MainWindow) Cleanup() {
 	// 停止流量图更新
 	if mw.trafficChart != nil {
 		mw.trafficChart.Stop()
+		mw.trafficChart = nil
+	}
+	if mw.nodePageInstance != nil {
+		mw.nodePageInstance.Cleanup()
+		mw.nodePageInstance = nil
+	}
+	if mw.subscriptionPageInstance != nil {
+		mw.subscriptionPageInstance.Cleanup()
+		mw.subscriptionPageInstance = nil
+	}
+	if mw.settingsPageInstance != nil {
+		mw.settingsPageInstance.Cleanup()
+		mw.settingsPageInstance = nil
 	}
 }
 
@@ -451,15 +465,12 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	}
 
 	if mw.serverNameLabel == nil {
-		if mw.appState.ServerNameBinding != nil {
-			mw.serverNameLabel = widget.NewLabelWithData(mw.appState.ServerNameBinding)
-		} else {
-			mw.serverNameLabel = widget.NewLabel("当前服务器: 无")
-		}
-		// 横向显示，不换行，只有在超过90%空间时才显示省略号
-		mw.serverNameLabel.Wrapping = fyne.TextWrapOff
+		mw.serverNameLabel = widget.NewLabel("无")
+		// 横向显示，超出可用宽度时截断并显示省略号
+		mw.serverNameLabel.Wrapping = fyne.TextTruncate
 		mw.serverNameLabel.Truncation = fyne.TextTruncateEllipsis
 	}
+	mw.updateHomeServerNameLabel()
 	// 创建主开关按钮（圆形，带链接图标）
 	if mw.mainToggleButton == nil {
 		// 计算按钮尺寸（窗口大小的1/10）
@@ -533,11 +544,8 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 		layout.NewSpacer(),
 	)
 
-	// 节点名称区域：占90%宽度，确保占满
-	nodeNameArea := container.NewWithoutLayout(mw.serverNameLabel)
-
 	// 使用自定义布局精确控制：图标10%，节点名称90%
-	nodeInfoContent := container.NewWithoutLayout(iconWithSpacer, nodeNameArea)
+	nodeInfoContent := container.NewWithoutLayout(iconWithSpacer, mw.serverNameLabel)
 	nodeInfoContent.Layout = &nodeNameLayout{}
 
 	// 节点信息区域：占满宽度，留一些边距，添加分隔线提升视觉效果
@@ -603,6 +611,9 @@ func (mw *MainWindow) buildHomePage() fyne.CanvasObject {
 	headerButtons := container.NewHBox(
 		mw.homeLogoIcon,
 		layout.NewSpacer(),
+		NewButtonWithIcon("订阅", theme.StorageIcon(), func() {
+			mw.ShowSubscriptionPage()
+		}),
 		NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
 			mw.ShowSettingsPage()
 		}),
@@ -685,6 +696,7 @@ func (mw *MainWindow) navigateToPage(pageType PageType, pushCurrent bool) {
 		if mw.appState != nil {
 			mw.appState.UpdateProxyStatus() // 更新绑定数据（serverNameLabel 会自动更新）
 		}
+		mw.updateHomeServerNameLabel()
 		pageContent = mw.homePage
 	case PageTypeNode:
 		if mw.nodePage == nil {
@@ -800,10 +812,44 @@ func (mw *MainWindow) refreshHomePageStatus() {
 	if mw.appState != nil {
 		mw.appState.UpdateProxyStatus()
 	}
+	mw.updateHomeServerNameLabel()
 	// 注意：不再显示延迟，已从节点信息区域移除
 	if mw.mainToggleButton != nil {
 		mw.updateMainToggleButton()
 	}
+}
+
+// updateHomeServerNameLabel 更新主页节点名称显示，超长文本会被手动省略。
+func (mw *MainWindow) updateHomeServerNameLabel() {
+	if mw == nil || mw.serverNameLabel == nil {
+		return
+	}
+
+	name := "无"
+	if mw.appState != nil && mw.appState.Store != nil && mw.appState.Store.Nodes != nil {
+		if selected := mw.appState.Store.Nodes.GetSelected(); selected != nil {
+			name = selected.Name
+		}
+	}
+
+	mw.serverNameLabel.SetText(truncateDisplayText(name, 25))
+}
+
+// truncateDisplayText 将文本截断到指定 rune 数，并在末尾追加省略号。
+func truncateDisplayText(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	runes := []rune(text)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return text
+	}
+	if maxRunes == 1 {
+		return "…"
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 // startProxy 启动代理（使用当前选中的节点）

@@ -41,7 +41,7 @@ func (sps *SystemProxyService) SetSystemProxy() error {
 
 // SetTerminalProxy 设置终端代理（环境变量代理）。
 // 参数：
-//   - proxyType: 代理类型（https 或 socks5）
+//   - proxyType: 代理类型（socks5、http、https_tls）
 //
 // 返回：错误（如果有）
 func (sps *SystemProxyService) SetTerminalProxy(proxyType string) error {
@@ -84,7 +84,7 @@ func (sps *SystemProxyService) UpdateProxy(host string, port int) {
 // ApplyProxyMode 应用指定的代理模式。
 // 参数：
 //   - mode: 代理模式字符串（clear/auto/terminal）
-//   - proxyType: 代理类型（https 或 socks5），仅用于terminal模式
+//   - proxyType: 代理类型（socks5、http、https_tls），仅用于 terminal 模式
 //
 // 返回：错误（如果有）
 func (sps *SystemProxyService) ApplyProxyMode(mode string, proxyType string) error {

@@ -20,6 +20,7 @@ type SubscriptionPage struct {
 	appState *AppState
 	list     *widget.List
 	content  fyne.CanvasObject
+	listener binding.DataListener
 }
 
 // NewSubscriptionPage 创建订阅管理页面
@@ -31,16 +32,26 @@ func NewSubscriptionPage(appState *AppState) *SubscriptionPage {
 	// 监听 Store 的订阅绑定数据变化，自动刷新列表。
 	// 使用 fyne.Do 确保 UI 刷新在主线程执行（ binding 可能在 goroutine 中触发）
 	if appState != nil && appState.Store != nil && appState.Store.Subscriptions != nil {
-		appState.Store.Subscriptions.SubscriptionsBinding.AddListener(binding.NewDataListener(func() {
+		sp.listener = binding.NewDataListener(func() {
 			fyne.Do(func() {
 				if sp.list != nil {
 					sp.list.Refresh()
 				}
 			})
-		}))
+		})
+		appState.Store.Subscriptions.SubscriptionsBinding.AddListener(sp.listener)
 	}
 
 	return sp
+}
+
+// Cleanup 释放页面持有的监听器，避免重复建页时旧实例被 binding 持有。
+func (sp *SubscriptionPage) Cleanup() {
+	if sp == nil || sp.listener == nil || sp.appState == nil || sp.appState.Store == nil || sp.appState.Store.Subscriptions == nil {
+		return
+	}
+	sp.appState.Store.Subscriptions.SubscriptionsBinding.RemoveListener(sp.listener)
+	sp.listener = nil
 }
 
 // Build 构建订阅管理页面UI
@@ -323,7 +334,7 @@ func (card *SubscriptionCard) Update(sub *database.Subscription) {
 	card.infoLabel.SetText(fmt.Sprintf("%d 节点 · 更新于 %s", nodeCount, lastUpdate))
 
 	// 绑定事件 (基于 ID 操作)
-		card.updateBtn.OnTapped = func() {
+	card.updateBtn.OnTapped = func() {
 		card.updateBtn.Disable()
 		go func() {
 			if card.page != nil && card.page.appState != nil && card.page.appState.SubscriptionService != nil {

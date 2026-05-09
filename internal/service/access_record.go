@@ -18,8 +18,8 @@ type AccessRecordService struct {
 }
 
 // xray 访问日志格式（空格分割）：第 6 个字段为 host:port
-// 示例: 2026/02/12 10:20:40.159520 from tcp:127.0.0.1:52101 accepted tcp:api2.cursor.sh:443 [socks-in -> proxy]
-// 示例: 2026/02/12 10:20:42.465015 from 127.0.0.1:52117 accepted //www.google.com:443 [socks-in -> proxy]
+// 示例: 2026/02/12 10:20:40.159520 from tcp:127.0.0.1:52101 accepted tcp:api2.cursor.sh:443 [mixed-in -> proxy]
+// 示例: 2026/02/12 10:20:42.465015 from 127.0.0.1:52117 accepted //www.google.com:443 [mixed-in -> proxy]
 // 字段索引: 0          1               2    3                   4        5
 
 // NewAccessRecordService 创建访问记录服务实例。
