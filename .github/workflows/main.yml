@@ -30,7 +30,31 @@ jobs:
       - name: Add Go bin to PATH
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # fyne-cross 镜像内 Go 可能低于 go.mod；GOTOOLCHAIN=auto 在容器内拉取 go1.25.x 工具链
+      # fyne 2.5.x 用 go mod edit -json 的 CombinedOutput 解析版本；工具链首次下载的 stderr 会混入导致 JSON 报错。
+      # 用与 fyne-cross 相同的 /go 缓存挂载先拉取模块与工具链，再执行打包。
+      - name: Prime Go module and toolchain in fyne-cross cache
+        run: |
+          set -e
+          CACHE="${HOME}/.cache/fyne-cross"
+          mkdir -p "$CACHE" "${{ github.workspace }}/fyne-cross/bin" "${{ github.workspace }}/fyne-cross/dist" "${{ github.workspace }}/fyne-cross/tmp"
+          prime() {
+            docker run --rm --platform linux/amd64 \
+              -u "$(id -u):$(id -g)" \
+              -e HOME=/tmp \
+              -e CGO_ENABLED=1 \
+              -e GOTOOLCHAIN=auto \
+              -e GOCACHE=/go/go-build \
+              -e GOMODCACHE=/go/pkg/mod \
+              -v "${{ github.workspace }}:/app" \
+              -v "${CACHE}:/go" \
+              -w /app \
+              "$1" \
+              bash -lc 'mkdir -p /go/go-build /go/pkg/mod && go mod download'
+          }
+          prime fyneio/fyne-cross-images:windows
+          prime fyneio/fyne-cross-images:linux
+
+      # fyne-cross 镜像内 Go 可能低于 go.mod；GOTOOLCHAIN=auto 在容器内按需使用已缓存的工具链
       - name: Build for Windows and Linux
         run: |
           fyne-cross windows -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
