@@ -49,7 +49,7 @@ jobs:
               -v "${CACHE}:/go" \
               -w /app \
               "$1" \
-              bash -lc 'mkdir -p /go/go-build /go/pkg/mod && go mod download'
+              bash -ec 'export PATH="/usr/local/go/bin:$PATH" && mkdir -p /go/go-build /go/pkg/mod && go mod download'
           }
           prime fyneio/fyne-cross-images:windows
           prime fyneio/fyne-cross-images:linux
