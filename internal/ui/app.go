@@ -337,6 +337,12 @@ func (a *AppState) Cleanup() {
 		a.XrayInstance = nil
 	}
 
+	if a.AccessRecordService != nil {
+		if err := a.AccessRecordService.Flush(); err != nil && a.Logger != nil {
+			a.Logger.Error("刷盘访问记录失败: %v", err)
+		}
+	}
+
 	if a.Logger != nil {
 		a.Logger.Close()
 		a.Logger = nil

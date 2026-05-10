@@ -27,16 +27,15 @@ type LogEntry struct {
 	Line      string // 完整的日志行
 }
 
-// 日志面板内存优化常量
+// 日志面板内存与展示上限（长期运行：控制内存，仅保留最近若干条）
 const (
-	maxBufferSize     = 1000  // 内存中最多保留的日志条数
-	maxDisplayLines   = 500   // RichText 最多渲染的条数（减少 UI 内存占用）
-	refreshDebounceMs = 300   // 快速追加日志时的刷新防抖间隔（毫秒）
+	maxLogPanelEntries = 200 // 缓冲与界面均最多保留最近条数；展示为时间倒序（最新在上）
+	refreshDebounceMs  = 300 // 快速追加日志时的刷新防抖间隔（毫秒）
 )
 
 // LogsPanel 管理应用日志和代理日志的显示。
 // 它支持按日志级别和类型过滤，并提供追加日志功能。
-// 内存优化：仅保留最近 N 条日志，限制显示条数，并对快速追加做防抖。
+// 内存优化：仅保留最近 maxLogPanelEntries 条，界面倒序展示最新内容，并对快速追加做防抖。
 type LogsPanel struct {
 	appState       *AppState
 	logContent     *widget.RichText // 使用 RichText 以支持自定义文本颜色
@@ -67,7 +66,7 @@ type LogsPanel struct {
 func NewLogsPanel(appState *AppState) *LogsPanel {
 	lp := &LogsPanel{
 		appState:      appState,
-		logBuffer:   make([]LogEntry, 0, maxBufferSize+1),
+		logBuffer:   make([]LogEntry, 0, maxLogPanelEntries+1),
 		isCollapsed:   true, // 默认折叠，符合“默认隐藏，需要时深入”的设计
 	}
 
@@ -259,8 +258,8 @@ func (lp *LogsPanel) AppendLogLine(logLine string) {
 
 	lp.bufferMutex.Lock()
 	lp.logBuffer = append(lp.logBuffer, *entry)
-	if len(lp.logBuffer) > maxBufferSize {
-		lp.logBuffer = lp.logBuffer[len(lp.logBuffer)-maxBufferSize:]
+	if len(lp.logBuffer) > maxLogPanelEntries {
+		lp.logBuffer = lp.logBuffer[len(lp.logBuffer)-maxLogPanelEntries:]
 	}
 	lp.bufferMutex.Unlock()
 
@@ -375,7 +374,7 @@ func (lp *LogsPanel) scheduleRefresh() {
 }
 
 // refreshDisplay 根据当前过滤条件刷新显示（仅过滤显示，不影响日志输出级别）。
-// 内存优化：最多渲染 maxDisplayLines 条，避免 RichText 持有过多 segment。
+// 在过滤结果中取时间顺序上最近 maxLogPanelEntries 条，按倒序（最新在上）渲染，控制 RichText segment 数量。
 func (lp *LogsPanel) refreshDisplay() {
 	if lp.logContent == nil || lp.levelSel == nil || lp.typeSel == nil {
 		return
@@ -396,16 +395,17 @@ func (lp *LogsPanel) refreshDisplay() {
 		filteredEntries = append(filteredEntries, entry)
 	}
 
-	// 只显示最近 maxDisplayLines 条，减少 RichText 内存占用
 	start := 0
-	if len(filteredEntries) > maxDisplayLines {
-		start = len(filteredEntries) - maxDisplayLines
+	if len(filteredEntries) > maxLogPanelEntries {
+		start = len(filteredEntries) - maxLogPanelEntries
 	}
 	displayEntries := filteredEntries[start:]
 	lp.bufferMutex.Unlock()
 
-	var segments []widget.RichTextSegment
-	for _, entry := range displayEntries {
+	n := len(displayEntries)
+	segments := make([]widget.RichTextSegment, 0, n)
+	for i := n - 1; i >= 0; i-- {
+		entry := displayEntries[i]
 		segments = append(segments, &widget.TextSegment{
 			Text: entry.Line + "\n",
 			Style: widget.RichTextStyle{
@@ -418,6 +418,9 @@ func (lp *LogsPanel) refreshDisplay() {
 	fyne.Do(func() {
 		lp.logContent.Segments = segments
 		lp.logContent.Refresh()
+		if lp.logScroll != nil {
+			lp.logScroll.ScrollToTop()
+		}
 	})
 }
 

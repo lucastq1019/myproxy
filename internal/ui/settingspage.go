@@ -718,10 +718,13 @@ func (sp *SettingsPage) buildAccessRecordContent() fyne.CanvasObject {
 	)
 }
 
-// loadAccessRecords 从 Store 加载访问记录。
+// loadAccessRecords 从数据库刷新访问记录缓存并载入列表数据。
 func (sp *SettingsPage) loadAccessRecords() {
 	sp.accessRecordsData = nil
 	if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.AccessRecords != nil {
+		if err := sp.appState.Store.AccessRecords.Load(); err != nil && sp.appState.Logger != nil {
+			sp.appState.Logger.Error("加载访问记录失败: %v", err)
+		}
 		sp.accessRecordsData = sp.appState.Store.AccessRecords.GetAll()
 	}
 	if sp.accessRecordsData == nil {

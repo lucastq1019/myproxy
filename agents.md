@@ -165,6 +165,29 @@ VERSION=1.0.0 ./build.sh
 构建目标: windows(amd64,386), linux(amd64,arm64), darwin(amd64,arm64)  
 构建参数: CGO_ENABLED=1, ldflags: -s -w -X main.version=$VERSION
 
+## 长期驻留与运行方式
+
+GUI 进程通过 `AppState.Run()` → `fyne.App.Run()` 常驻事件循环；适合「长时间开代理、最小化到托盘」的使用方式，与 `todo.md` 中「二、长期运行需求」「六、2. 长期驻留场景」的验证目标一致。
+
+### 窗口与托盘
+
+- 点击主窗口关闭：仅 `Hide()`，不结束进程（`AppState.SetupWindowCloseHandler`）；托盘「显示窗口」可再次打开。
+- 彻底退出：托盘菜单「退出」→ `App.Quit()`，`Run()` 返回后 `defer Cleanup()` 会停止 xray、诊断采样、日志等。
+- 托盘依赖 Fyne `desktop.App`；若运行环境无桌面扩展，则无托盘，需保留可见窗口或改用开机任务保持进程。
+
+### 启动后自动开代理（可选）
+
+- 应用配置 `autoStartProxy` 为 `true` 且存在有效 `selectedServerID` 时，`Startup()` 内会尝试自动启动代理（`autoLoadProxyConfig`），便于开机自启本程序后恢复上次节点。
+
+### 长时间运行的观测
+
+- 设置 → **诊断**：内存 / goroutine 趋势与堆快照导出，用于对照 `todo.md` 中长期驻留场景（8h / 24h 曲线、切节点后是否回落）。
+- 可选开启 `debugPprofEnabled`（仅本机地址）做深度采样；默认关闭。
+
+### 已知开放项（勿过度承诺）
+
+- 系统休眠 / 唤醒后代理与系统代理是否需自动恢复、如何恢复，仍以 `todo.md`「二、2. 长期运行需求」为跟踪项；实现前对用户说明可能需手动检查或重开代理。
+
 ## 约束
 
 - 唯一入口: cmd/gui/main.go

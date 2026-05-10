@@ -632,19 +632,16 @@ func (ars *AccessRecordsStore) GetAll() []model.AccessRecord {
 }
 
 // RecordAccess 记录访问，address 为 host:port。
+// 成功写入数据库后不调用 Load：避免每条 xray 访问日志都全表重载（长期运行会放大 SQLite 与内存压力）。
+// 需要展示最新数据时由 UI 调用 Load 后再 GetAll。
 func (ars *AccessRecordsStore) RecordAccess(address string, count, uploadBytes, downloadBytes int64) error {
-	if err := database.InsertOrUpdateAccessRecord(address, count, uploadBytes, downloadBytes); err != nil {
-		return err
-	}
-	return ars.Load()
+	return database.InsertOrUpdateAccessRecord(address, count, uploadBytes, downloadBytes)
 }
 
 // RecordAccessBatch 批量记录访问，key 为 address (host:port)。
+// 与 RecordAccess 相同，不在此处全表 Load；由调用方在适当时机 Load。
 func (ars *AccessRecordsStore) RecordAccessBatch(addressCounts map[string]int64) error {
-	if err := database.BatchInsertOrUpdateAccessRecords(addressCounts); err != nil {
-		return err
-	}
-	return ars.Load()
+	return database.BatchInsertOrUpdateAccessRecords(addressCounts)
 }
 
 func (ars *AccessRecordsStore) Delete(id int64) error {
