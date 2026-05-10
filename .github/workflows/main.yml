@@ -30,10 +30,11 @@ jobs:
       - name: Add Go bin to PATH
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+      # fyne-cross 镜像内 Go 可能低于 go.mod；GOTOOLCHAIN=auto 在容器内拉取 go1.25.x 工具链
       - name: Build for Windows and Linux
         run: |
-          fyne-cross windows -app-id com.lucastq.myproxy -output proxy-gui ./cmd/gui
-          fyne-cross linux -app-id com.lucastq.myproxy -output proxy-gui ./cmd/gui
+          fyne-cross windows -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
+          fyne-cross linux -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
 
       - name: Upload build artifacts (Windows, Linux)
         uses: actions/upload-artifact@v4
@@ -63,7 +64,7 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build for macOS
-        run: fyne-cross darwin -app-id com.lucastq.myproxy -output proxy-gui ./cmd/gui
+        run: fyne-cross darwin -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
 
       - name: Upload build artifacts (macOS)
         uses: actions/upload-artifact@v4
