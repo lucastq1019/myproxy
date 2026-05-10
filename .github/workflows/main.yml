@@ -66,38 +66,10 @@ jobs:
           name: myproxy-linux-windows
           path: fyne-cross/dist/**
 
-  build-darwin:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.0"
-          cache: true
-
-      - name: Generate Icon.png
-        run: go run ./tools/genicon
-
-      - name: Install fyne-cross
-        run: go install github.com/fyne-io/fyne-cross@latest
-
-      - name: Add Go bin to PATH
-        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Build for macOS
-        run: fyne-cross darwin -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
-
-      - name: Upload build artifacts (macOS)
-        uses: actions/upload-artifact@v4
-        with:
-          name: myproxy-darwin
-          path: fyne-cross/dist/**
-
+  # macOS：fyne-cross 在 macos-latest 上依赖 Docker/Podman（engine binary not found in PATH）。
+  # 恢复发布时请安装 Docker Desktop 并改用 engine docker，或在本机用 fyne package 打 .app 后单独上传。
   release:
-    needs: [build-linux-windows, build-darwin]
+    needs: [build-linux-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
