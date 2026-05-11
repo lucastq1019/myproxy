@@ -3,8 +3,14 @@ package service
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"myproxy.com/p/internal/store"
+)
+
+const (
+	accessRecordFlushDebounce    = 2 * time.Second // 合并写库前的最长等待
+	accessRecordFlushMaxPending  = 400             // 待刷盘地址数上限，防止高流量时 map 过大
 )
 
 // AccessRecordService 访问记录服务，提供从日志解析并记录访问记录的能力。
@@ -12,9 +18,14 @@ type AccessRecordService struct {
 	store *store.Store
 
 	// 批量模式：用于 loadInitialLogs 等场景，避免逐行写入 DB
-	mu           sync.Mutex
-	batchMode    bool
-	batchCounts  map[string]int64
+	mu          sync.Mutex
+	batchMode   bool
+	batchCounts map[string]int64
+
+	// 非批量模式：内存合并后定时/定量刷盘，降低长期运行下 SQLite 写入频率
+	pending    map[string]int64
+	flushTimer *time.Timer
+	flushGen   uint64 // 每次重排定时器递增，避免旧 AfterFunc 回调误清空新 timer
 }
 
 // xray 访问日志格式（空格分割）：第 6 个字段为 host:port
@@ -29,6 +40,7 @@ func NewAccessRecordService(store *store.Store) *AccessRecordService {
 
 // StartBatch 开启批量模式，后续 RecordAccessFromLogLine 将累积到内存，由 EndBatch 统一写入。
 func (ars *AccessRecordService) StartBatch() {
+	_ = ars.Flush()
 	ars.mu.Lock()
 	ars.batchMode = true
 	ars.batchCounts = make(map[string]int64)
@@ -51,7 +63,7 @@ func (ars *AccessRecordService) EndBatch() error {
 }
 
 // RecordAccessFromLogLine 解析日志行，若为 xray 访问日志则提取 address (host:port) 并记录。
-// 批量模式下累积到内存；否则立即写入 DB。
+// 批量模式下累积到 batchCounts；否则写入 pending，经防抖或达到上限后批量落库。
 // 返回：是否成功记录（true 表示解析到并记录了地址）。
 func (ars *AccessRecordService) RecordAccessFromLogLine(line string) bool {
 	address := extractAddressFromXrayAccessLine(line)
@@ -68,10 +80,79 @@ func (ars *AccessRecordService) RecordAccessFromLogLine(line string) bool {
 		ars.mu.Unlock()
 		return true
 	}
+	if ars.pending == nil {
+		ars.pending = make(map[string]int64)
+	}
+	ars.pending[address]++
+	if ars.flushTimer != nil {
+		ars.flushTimer.Stop()
+		ars.flushTimer = nil
+	}
+	if len(ars.pending) >= accessRecordFlushMaxPending {
+		ars.flushGen++
+		counts := ars.pending
+		ars.pending = make(map[string]int64)
+		ars.mu.Unlock()
+		_ = ars.store.AccessRecords.RecordAccessBatch(counts)
+		return true
+	}
+	ars.flushGen++
+	myGen := ars.flushGen
+	ars.flushTimer = time.AfterFunc(accessRecordFlushDebounce, func() {
+		ars.flushPendingAsync(myGen)
+	})
 	ars.mu.Unlock()
-
-	_ = ars.store.AccessRecords.RecordAccess(address, 1, 0, 0)
 	return true
+}
+
+// flushPendingAsync 由定时器在独立 goroutine 调用，将 pending 合并写入数据库。
+func (ars *AccessRecordService) flushPendingAsync(myGen uint64) {
+	if ars == nil {
+		return
+	}
+	ars.mu.Lock()
+	if ars.flushGen != myGen {
+		ars.mu.Unlock()
+		return
+	}
+	if ars.flushTimer != nil {
+		ars.flushTimer = nil
+	}
+	if len(ars.pending) == 0 {
+		ars.mu.Unlock()
+		return
+	}
+	counts := ars.pending
+	ars.pending = make(map[string]int64)
+	storeRef := ars.store
+	ars.mu.Unlock()
+	if storeRef != nil && storeRef.AccessRecords != nil {
+		_ = storeRef.AccessRecords.RecordAccessBatch(counts)
+	}
+}
+
+// Flush 将内存中待写入的访问记录立即落盘（应用退出或进入批量模式前调用）。
+func (ars *AccessRecordService) Flush() error {
+	if ars == nil {
+		return nil
+	}
+	ars.mu.Lock()
+	if ars.flushTimer != nil {
+		ars.flushTimer.Stop()
+		ars.flushTimer = nil
+	}
+	ars.flushGen++
+	var counts map[string]int64
+	if len(ars.pending) > 0 {
+		counts = ars.pending
+		ars.pending = make(map[string]int64)
+	}
+	storeRef := ars.store
+	ars.mu.Unlock()
+	if len(counts) == 0 || storeRef == nil || storeRef.AccessRecords == nil {
+		return nil
+	}
+	return storeRef.AccessRecords.RecordAccessBatch(counts)
 }
 
 // ExtractAddressFromLogLine 解析日志行提取 address (host:port)，供批量处理使用。

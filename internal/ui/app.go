@@ -3,9 +3,12 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/theme"
 	"myproxy.com/p/internal/database"
@@ -43,6 +46,9 @@ type AppState struct {
 	// OnLogLine 统一日志入口：收到完整日志行时调用，用于分发到展示和访问记录。
 	// 由 MainWindow 设置，供 Logger 的 panelCallback 和文件读取使用。
 	OnLogLine func(logLine string)
+
+	windowSizeSaveMu    sync.Mutex
+	windowSizeSaveTimer *time.Timer
 }
 
 func NewAppState() *AppState {
@@ -110,12 +116,13 @@ func (a *AppState) InitApp() error {
 
 	a.Window = a.App.NewWindow("myproxy")
 
-	defaultSize := fyne.NewSize(420, 520)
-	a.Window.Resize(a.LoadWindowSize(defaultSize))
-
+	// 必须先加载数据库中的 app_config（含 windowSize），再按配置 Resize，否则会误用默认尺寸并在后续 SetContent 时写回库覆盖用户值。
 	if a.Store != nil {
 		a.Store.LoadAll()
 	}
+
+	defaultSize := fyne.NewSize(420, 520)
+	a.Window.Resize(a.LoadWindowSize(defaultSize))
 
 	if a.ConfigService != nil {
 		_ = a.ConfigService.SaveDefaultDirectRoutes()
@@ -198,6 +205,73 @@ func (a *AppState) SaveWindowSize(size fyne.Size) {
 	}
 }
 
+const persistWindowSizeDebounce = 400 * time.Millisecond
+
+func (a *AppState) stopWindowSizeSaveTimer() {
+	if a == nil {
+		return
+	}
+	a.windowSizeSaveMu.Lock()
+	defer a.windowSizeSaveMu.Unlock()
+	if a.windowSizeSaveTimer != nil {
+		a.windowSizeSaveTimer.Stop()
+		a.windowSizeSaveTimer = nil
+	}
+}
+
+// schedulePersistWindowSize 在窗口内容区尺寸变化后防抖写入 windowSize（Fyne 无窗口级 resize 回调）。
+func (a *AppState) schedulePersistWindowSize() {
+	if a == nil {
+		return
+	}
+	a.windowSizeSaveMu.Lock()
+	defer a.windowSizeSaveMu.Unlock()
+	if a.windowSizeSaveTimer != nil {
+		a.windowSizeSaveTimer.Stop()
+	}
+	a.windowSizeSaveTimer = time.AfterFunc(persistWindowSizeDebounce, func() {
+		a.windowSizeSaveMu.Lock()
+		a.windowSizeSaveTimer = nil
+		a.windowSizeSaveMu.Unlock()
+		if a.Window == nil || a.Window.Canvas() == nil {
+			return
+		}
+		s := a.Window.Canvas().Size()
+		if s.Width >= 200 && s.Height >= 200 {
+			a.SaveWindowSize(s)
+		}
+	})
+}
+
+// wrapWithWindowSizePersistence 包裹根内容，使拖动/缩放窗口后 windowSize 能落库。
+func (a *AppState) wrapWithWindowSizePersistence(inner fyne.CanvasObject) fyne.CanvasObject {
+	if a == nil || inner == nil {
+		return inner
+	}
+	return container.New(&windowSizePersistLayout{appState: a}, inner)
+}
+
+type windowSizePersistLayout struct {
+	appState *AppState
+}
+
+func (l *windowSizePersistLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) > 0 && objects[0] != nil {
+		objects[0].Resize(size)
+		objects[0].Move(fyne.NewPos(0, 0))
+	}
+	if l.appState != nil && size.Width >= 200 && size.Height >= 200 {
+		l.appState.schedulePersistWindowSize()
+	}
+}
+
+func (l *windowSizePersistLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 || objects[0] == nil {
+		return fyne.NewSize(0, 0)
+	}
+	return objects[0].MinSize()
+}
+
 func (a *AppState) SetupTray() {
 	a.TrayManager = NewTrayManager(a)
 	a.TrayManager.SetupTray()
@@ -210,8 +284,12 @@ func (a *AppState) SetupWindowCloseHandler() {
 	}
 
 	a.Window.SetCloseIntercept(func() {
+		a.stopWindowSizeSaveTimer()
 		if a.Window != nil && a.Window.Canvas() != nil {
-			a.SaveWindowSize(a.Window.Canvas().Size())
+			sz := a.Window.Canvas().Size()
+			if sz.Width >= 200 && sz.Height >= 200 {
+				a.SaveWindowSize(sz)
+			}
 		}
 		a.Window.Hide()
 	})
@@ -251,7 +329,7 @@ func (a *AppState) Startup() error {
 
 	content := mainWindow.Build()
 	if content != nil {
-		a.Window.SetContent(content)
+		a.Window.SetContent(a.wrapWithWindowSizePersistence(content))
 	}
 
 	a.SetupTray()
@@ -320,6 +398,8 @@ func (a *AppState) autoLoadProxyConfig() error {
 }
 
 func (a *AppState) Cleanup() {
+	a.stopWindowSizeSaveTimer()
+
 	if a.MainWindow != nil {
 		a.MainWindow.Cleanup()
 		a.MainWindow = nil
@@ -335,6 +415,12 @@ func (a *AppState) Cleanup() {
 			_ = a.XrayInstance.Stop()
 		}
 		a.XrayInstance = nil
+	}
+
+	if a.AccessRecordService != nil {
+		if err := a.AccessRecordService.Flush(); err != nil && a.Logger != nil {
+			a.Logger.Error("刷盘访问记录失败: %v", err)
+		}
 	}
 
 	if a.Logger != nil {

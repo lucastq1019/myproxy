@@ -44,6 +44,7 @@ type TrafficChart struct {
 	// 更新定时器
 	updateTicker *time.Ticker
 	stopChan     chan struct{}
+	stopOnce     sync.Once
 }
 
 // NewTrafficChart 创建新的流量图组件
@@ -132,12 +133,18 @@ func (tc *TrafficChart) updateData() {
 	tc.currentDownload = download
 }
 
-// Stop 停止更新
+// Stop 停止更新（可重复调用；仅首次会停 ticker 并关闭 stopChan，避免 panic）。
 func (tc *TrafficChart) Stop() {
-	if tc.updateTicker != nil {
-		tc.updateTicker.Stop()
+	if tc == nil {
+		return
 	}
-	close(tc.stopChan)
+	tc.stopOnce.Do(func() {
+		if tc.updateTicker != nil {
+			tc.updateTicker.Stop()
+			tc.updateTicker = nil
+		}
+		close(tc.stopChan)
+	})
 }
 
 // CreateRenderer 创建渲染器

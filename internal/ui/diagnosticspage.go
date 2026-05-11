@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -27,8 +28,9 @@ type DiagnosticsPage struct {
 	memChart      *MetricChart
 	gorChart      *MetricChart
 
-	ticker *time.Ticker
-	stopCh chan struct{}
+	ticker      *time.Ticker
+	stopCh      chan struct{}
+	cleanupOnce sync.Once
 }
 
 // NewDiagnosticsPage 创建诊断页。
@@ -274,16 +276,21 @@ func (dp *DiagnosticsPage) Refresh() {
 	}
 }
 
-// Cleanup 停止自动刷新。
+// Cleanup 停止自动刷新（可重复调用；仅首次关闭 ticker 与 stopCh）。
 func (dp *DiagnosticsPage) Cleanup() {
-	if dp.ticker != nil {
-		dp.ticker.Stop()
-		dp.ticker = nil
+	if dp == nil {
+		return
 	}
-	if dp.stopCh != nil {
-		close(dp.stopCh)
-		dp.stopCh = nil
-	}
+	dp.cleanupOnce.Do(func() {
+		if dp.ticker != nil {
+			dp.ticker.Stop()
+			dp.ticker = nil
+		}
+		if dp.stopCh != nil {
+			close(dp.stopCh)
+			dp.stopCh = nil
+		}
+	})
 }
 
 func (dp *DiagnosticsPage) startAutoRefresh() {

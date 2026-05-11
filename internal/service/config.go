@@ -163,6 +163,40 @@ func (cs *ConfigService) GetLocalInboundPort() int {
 	return p
 }
 
+// GetMixedInboundListenAll 是否在所有接口上监听混合入站（0.0.0.0），便于 WSL2 等通过 Windows 主机 IP 连接。
+// 读取 app_config 键 mixedInboundListenAll；非 "true" 时视为 false。
+func (cs *ConfigService) GetMixedInboundListenAll() bool {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return false
+	}
+	def := database.AppConfigBuiltinDefault("mixedInboundListenAll")
+	v, err := cs.store.AppConfig.GetWithDefault("mixedInboundListenAll", def)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(strings.ToLower(v)) == "true"
+}
+
+// SetMixedInboundListenAll 设置是否在所有接口上监听混合入站。
+func (cs *ConfigService) SetMixedInboundListenAll(listenAll bool) error {
+	if cs.store == nil || cs.store.AppConfig == nil {
+		return fmt.Errorf("Store 未初始化")
+	}
+	val := "false"
+	if listenAll {
+		val = "true"
+	}
+	return cs.store.AppConfig.Set("mixedInboundListenAll", val)
+}
+
+// GetMixedInboundXrayListenAddress 返回 xray 混合入站应绑定的地址（127.0.0.1 或 0.0.0.0）。
+func (cs *ConfigService) GetMixedInboundXrayListenAddress() string {
+	if cs.GetMixedInboundListenAll() {
+		return "0.0.0.0"
+	}
+	return database.LocalMixedInboundListenHost
+}
+
 // GetSystemProxyMode 获取系统代理模式。
 // 返回：系统代理模式（清除系统代理 / 自动配置系统代理）；历史值「环境变量代理」由 UI 迁移为清除模式。
 func (cs *ConfigService) GetSystemProxyMode() string {

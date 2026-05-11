@@ -17,31 +17,28 @@ import (
 )
 
 var (
-	// 图标缓存
 	trayIconCache  fyne.Resource
 	appIconCache   fyne.Resource
 	iconCacheMutex sync.Mutex
 )
 
-// getIconDir 获取图标存储目录
+// getIconDir returns the asset directory, compatible with both `go run` and `go build`.
 func getIconDir() string {
-	execPath, err := os.Executable()
+	exec, err := os.Executable()
 	if err != nil {
 		wd, _ := os.Getwd()
 		return filepath.Join(wd, "assets")
 	}
-	execDir := filepath.Dir(execPath)
-	// go run 将二进制放在系统临时目录的 go-build* 下，与 go build 产物路径不一致；
-	// 此时应用数据（数据库、日志等）仍以工作目录为准，图标目录应对齐到工作目录。
-	if strings.Contains(strings.ToLower(execDir), "go-build") {
+	dir := filepath.Dir(exec)
+	if strings.Contains(strings.ToLower(dir), "go-build") {
 		if wd, err := os.Getwd(); err == nil {
 			return filepath.Join(wd, "assets")
 		}
 	}
-	return filepath.Join(execDir, "assets")
+	return filepath.Join(dir, "assets")
 }
 
-// ClearIconCaches 清除图标缓存，主题切换后调用以便重新生成对应主题的图标。
+// ClearIconCaches clears cached icons; call this after a theme change.
 func ClearIconCaches() {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
@@ -49,245 +46,265 @@ func ClearIconCaches() {
 	appIconCache = nil
 }
 
-// createAppIcon 创建应用图标资源（用于窗口图标，228x228）
-// 参数：
-//   - appState: 应用状态（用于获取主题配置）
+// resolveVariant converts the AppState theme setting to a fyne.ThemeVariant.
+func resolveVariant(appState *AppState) fyne.ThemeVariant {
+	if appState == nil {
+		return theme.VariantDark
+	}
+	switch appState.GetTheme() {
+	case ThemeLight:
+		return theme.VariantLight
+	case ThemeSystem:
+		if appState.App != nil {
+			return appState.App.Settings().ThemeVariant()
+		}
+	}
+	return theme.VariantDark
+}
+
+func iconVariantSuffix(variant fyne.ThemeVariant) string {
+	if variant == theme.VariantLight {
+		return "light"
+	}
+	return "dark"
+}
+
+// iconRasterVariant selects which pixmap (light vs dark look) to rasterise for window/tray/home.
+// It is the opposite of the UI theme variant so the mark stays legible on typical title bar / tray
+// contrast (light chrome → dark glyph; dark chrome → light glyph).
+func iconRasterVariant(appState *AppState) fyne.ThemeVariant {
+	v := resolveVariant(appState)
+	if v == theme.VariantLight {
+		return theme.VariantDark
+	}
+	return theme.VariantLight
+}
+
+// createAppIcon returns the 228×228 window icon (cached after first call).
 func createAppIcon(appState *AppState) fyne.Resource {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
-
-	if appIconCache != nil {
-		return appIconCache
+	if appIconCache == nil {
+		v := iconRasterVariant(appState)
+		name := fmt.Sprintf("app-icon-v3-%s.png", iconVariantSuffix(v))
+		appIconCache = buildIcon(228, name, v)
 	}
-
-	appIconCache = createLShapeIcon(228, "app-icon.png", appState)
 	return appIconCache
 }
 
-// createTrayIconResource 创建系统托盘图标资源（32x32，L形布局）
-// 参数：
-//   - appState: 应用状态（用于获取主题配置）
+// createTrayIconResource returns the 32×32 system tray icon (cached after first call).
 func createTrayIconResource(appState *AppState) fyne.Resource {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
-
-	if trayIconCache != nil {
-		return trayIconCache
+	if trayIconCache == nil {
+		v := iconRasterVariant(appState)
+		name := fmt.Sprintf("tray-icon-v3-%s.png", iconVariantSuffix(v))
+		trayIconCache = buildIcon(32, name, v)
 	}
-
-	trayIconCache = createLShapeIcon(32, "tray-icon.png", appState)
 	return trayIconCache
 }
 
-// createHomeLogo 创建主页logo资源（32x32，根据主题变化）
-// 参数：
-//   - appState: 应用状态（用于获取主题配置）
-// 注意：logo颜色与主题色相反（light主题用dark色，dark主题用light色）
+// createHomeLogo returns the 32×32 home-page logo for the current theme.
 func createHomeLogo(appState *AppState) fyne.Resource {
-	// 获取当前主题
-	currentTheme := ThemeDark
+	drawV := iconRasterVariant(appState)
+	varStr := "dark"
+	if drawV == theme.VariantLight {
+		varStr = "light"
+	}
+	themeStr := "dark"
 	if appState != nil {
-		currentTheme = appState.GetTheme()
+		themeStr = string(appState.GetTheme())
 	}
-
-	// 确定相反的主题variant
-	var oppositeVariant fyne.ThemeVariant
-	if currentTheme == ThemeLight {
-		oppositeVariant = theme.VariantDark
-	} else if currentTheme == ThemeSystem {
-		// 如果是系统主题，需要判断当前系统主题
-		if appState != nil && appState.App != nil {
-			systemVariant := appState.App.Settings().ThemeVariant()
-			if systemVariant == theme.VariantLight {
-				oppositeVariant = theme.VariantDark
-			} else {
-				oppositeVariant = theme.VariantLight
-			}
-		} else {
-			oppositeVariant = theme.VariantDark
-		}
-	} else {
-		// ThemeDark
-		oppositeVariant = theme.VariantLight
-	}
-
-	// 生成文件名，使用相反主题，包含variant信息确保不同主题使用不同文件
-	variantStr := "dark"
-	if oppositeVariant == theme.VariantLight {
-		variantStr = "light"
-	}
-	fileName := fmt.Sprintf("home-logo-%s-opposite-%s.png", currentTheme, variantStr)
-	return createLShapeIconWithVariant(32, fileName, oppositeVariant)
+	name := fmt.Sprintf("home-logo-v3-%s-draw-%s.png", themeStr, varStr)
+	return buildIcon(32, name, drawV)
 }
 
-// createLShapeIconWithVariant 创建下L形布局的图标（使用指定的主题variant）
-// 参数：
-//   - size: 图标尺寸（正方形）
-//   - name: 资源名称
-//   - variant: 主题变体（用于确定logo颜色）
-func createLShapeIconWithVariant(size int, name string, variant fyne.ThemeVariant) fyne.Resource {
-	// 检查文件是否已存在
-	iconDir := getIconDir()
-	iconPath := filepath.Join(iconDir, name)
-
-	// 如果文件存在，直接加载（文件名已包含主题信息，确保不同主题使用不同文件）
-	if _, err := os.Stat(iconPath); err == nil {
-		fmt.Printf("图标文件已存在，加载: %s\n", iconPath)
-		if data, err := os.ReadFile(iconPath); err == nil {
-			return fyne.NewStaticResource(name, data)
-		}
-		fmt.Printf("读取图标文件失败，重新生成: %v\n", err)
+// buildIcon loads an icon from the disk cache, or renders and saves it.
+func buildIcon(size int, name string, variant fyne.ThemeVariant) fyne.Resource {
+	path := filepath.Join(getIconDir(), name)
+	if data, err := os.ReadFile(path); err == nil {
+		return fyne.NewStaticResource(name, data)
 	}
-
-	// 创建主题实例并使用 Color 方法获取背景色
-	monochromeTheme := NewMonochromeTheme(variant)
-	bgColorValue := monochromeTheme.Color(theme.ColorNameBackground, variant)
-
-	// 转换为 RGBA，失败时使用默认主题背景色
-	var bgColor color.RGBA
-	if nrgba, ok := bgColorValue.(color.NRGBA); ok {
-		bgColor = color.RGBA{R: nrgba.R, G: nrgba.G, B: nrgba.B, A: nrgba.A}
-	} else if rgba, ok := bgColorValue.(color.RGBA); ok {
-		bgColor = rgba
-	} else {
-		fallback := theme.DefaultTheme().Color(theme.ColorNameBackground, variant)
-		r, g, b, a := fallback.RGBA()
-		bgColor = color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
-	}
-
-	// 使用新的绘制方式创建图标
-	img := createIconImage(size, bgColor)
-
-	// 将图片编码为 PNG
+	img := renderIcon(size, variant)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
-		fmt.Printf("编码 PNG 失败 (%s): %v\n", name, err)
+		fmt.Printf("png encode failed (%s): %v\n", name, err)
 		return nil
 	}
-
-	// 保存到文件系统
-	if err := os.MkdirAll(iconDir, 0755); err != nil {
-		fmt.Printf("创建图标目录失败: %v\n", err)
-	} else {
-		if err := os.WriteFile(iconPath, buf.Bytes(), 0644); err != nil {
-			fmt.Printf("保存图标文件失败 (%s): %v\n", iconPath, err)
-		} else {
-			fmt.Printf("图标已保存到文件: %s\n", iconPath)
-		}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err == nil {
+		_ = os.WriteFile(path, buf.Bytes(), 0644)
 	}
-
-	fmt.Printf("图标创建成功 (%s, %dx%d)，大小: %d 字节\n", name, size, size, buf.Len())
 	return fyne.NewStaticResource(name, buf.Bytes())
 }
 
-// createLShapeIcon 创建下L形布局的图标（使用水滴形状）
-// 参数：
-//   - size: 图标尺寸（正方形）
-//   - name: 资源名称
-//   - appState: 应用状态（用于获取主题配置）
-func createLShapeIcon(size int, name string, appState *AppState) fyne.Resource {
-	// 从主题获取背景色
-	// 从 ConfigService 读取主题配置
-	themeVariant := theme.VariantDark
-	if appState != nil {
-		themeStr := appState.GetTheme()
-		switch themeStr {
-		case ThemeLight:
-			themeVariant = theme.VariantLight
-		case ThemeSystem:
-			// 如果是系统主题，需要判断当前系统主题
-			if appState.App != nil {
-				themeVariant = appState.App.Settings().ThemeVariant()
-			}
-		default:
-			themeVariant = theme.VariantDark
-		}
+// renderIcon rasterises the VPN "L-in-circle" icon at any square size.
+//
+// ── Design spec (base 32×32 grid, scaled uniformly to `size`) ──────────────
+//
+//	Canvas:  size×size px, 1 px padding → circle touches all four inset edges
+//	Circle:  center (16,16), radius 15, diameter 30
+//
+//	L shape (hollowed negative space), "Regular" weight, corner radius 1.5 u:
+//	  Vertical bar:    x=[10,14]  y=[7,25]   — full height of the L
+//	  Horizontal bar:  x=[14,23]  y=[21,25]  — foot, shares right edge of vert bar
+//
+//	Gap-split effect:
+//	  The two bars overlap in the region x=[10,14] y=[21,25].
+//	  Instead of merging seamlessly, two hairline seams are cut at the junction:
+//	    Vertical seam:   x ∈ [vx1−gV, vx1+gV],  y ∈ [hy0, vy1]
+//	                     (right edge of vertical bar / left edge of horizontal bar)
+//	    Horizontal seam: y ∈ [hy0−gH, hy0+gH],  x ∈ [vx0, vx1]
+//	                     (top edge of horizontal bar, within vertical bar width)
+//	  Pixels inside a seam are transparent — everything else inside the L union
+//	  retains its fill colour.  The overlap region itself is therefore coloured
+//	  (not hollow), except for the two thin seam lines.
+//
+//	Anti-aliasing: 4×4 supersampling; circle edge smooth, L edges crisp.
+//	Outside circle: always alpha = 0 (transparent) for both variants.
+//	Dark:  opaque black disk, transparent L body only; hairline seams stay black (same as disk “fill”),
+//	      mirroring light where seams take the white fill — outside circle transparent.
+//	Light: white fill inside the circle, black L graphic (seams read as white like the fill); outside circle transparent.
+func renderIcon(size int, variant fyne.ThemeVariant) *image.RGBA {
+	const base = 32.0
+	const ss = 4
+
+	sc := float64(size) / base
+	light := variant == theme.VariantLight
+
+	// Circle (pixel space).
+	cx, cy, cr := 16*sc, 16*sc, 15*sc
+	aa := 0.7 * sc
+
+	// L bars (base-32 units).
+	const (
+		rr  = 1.5 // corner radius
+		vx0 = 10.0; vx1 = 14.0; vy0 = 7.0; vy1 = 25.0
+		hx0 = 14.0; hx1 = 23.0; hy0 = 21.0; hy1 = 25.0
+	)
+
+	// Seam half-widths (base-32 units). ~0.5 u ≈ 1 px at 32 px output.
+	const gV = 0.5 // vertical seam half-width   (along x-axis)
+	const gH = 0.5 // horizontal seam half-width  (along y-axis)
+
+	// Seam regions (base-32 units).
+	// Vertical seam: right edge of vert bar meets left edge of horiz bar.
+	const svX0, svX1 = vx1 - gV, vx1 + gV
+	const svY0, svY1 = hy0, vy1
+
+	// Horizontal seam: top edge of horiz bar, only within vert bar x-range.
+	const shX0, shX1 = vx0, vx1
+	const shY0, shY1 = hy0 - gH, hy0 + gH
+
+	inSeam := func(bx, by float64) bool {
+		sv := bx >= svX0 && bx <= svX1 && by >= svY0 && by <= svY1
+		sh := bx >= shX0 && bx <= shX1 && by >= shY0 && by <= shY1
+		return sv || sh
 	}
-	return createLShapeIconWithVariant(size, name, themeVariant)
-}
 
-// createIconImage 使用透明区域方式生成图标
-// size: 图标尺寸（正方形）
-// bgColor: 背景颜色（从主题获取）
-func createIconImage(size int, bgColor color.RGBA) *image.RGBA {
-	transparent := color.RGBA{0, 0, 0, 0} // 透明色
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	step := 1.0 / float64(ss)
 
-	// 1. 创建画布
-	rect := image.Rect(0, 0, size, size)
-	canvas := image.NewRGBA(rect)
-
-	// 2. 计算 L 形尺寸和位置
-	center := float64(size) / 2.0
-	radius := center
-	R := float64(size) / 6.0
-	H := float64(size) / 2.0
-	G := float64(size) / 50.0     // 间隙缩小一半（原来是 size/10）
-	L_line := float64(size) / 3.0 // 横线长度缩短1/2（原来是 size/2）
-	W_line := R * 2.0 / 4.0       // 线宽
-
-	// 计算L形的整体尺寸，用于居中定位
-	// L形总宽度 = 左侧宽度(R*2) + 间隙(G) + 横线长度(L_line)
-	lTotalWidth := R*2.0 + G + L_line
-	// L形总高度 = 三角形高度(H) + 圆的半径(R)
-	lTotalHeight := H + R
-
-	// L形整体居中定位
-	lStartX := center - lTotalWidth/2.0
-	lStartY := center - lTotalHeight/2.0
-
-	// 左侧部分（圆和三角形）的位置
-	// 圆心X坐标：L形起始X + 圆的半径
-	Cx := lStartX + R
-	// 圆心Y坐标：L形起始Y + L形总高度 - 圆的半径（底部对齐）
-	Cy := lStartY + lTotalHeight - R
-	// 三角形底部Y坐标（与圆心重叠）
-	Ty := Cy
-
-	// 矩形（横线）的位置
-	lineStart := lStartX + R*2.0 + G
-	lineEnd := lineStart + L_line
-	lineTop := lStartY + lTotalHeight - W_line
-	lineBottom := lStartY + lTotalHeight
-
-	// 3. 绘制背景圆，在三角形、圆形、矩形区域内保持透明
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			xf := float64(x)
-			yf := float64(y)
+			var sSolid float64
+			var pmR, pmG, pmB, pmA float64
 
-			// 判断是否在圆形背景内
-			distToCenter := math.Sqrt(math.Pow(xf-center, 2) + math.Pow(yf-center, 2))
-			if distToCenter > radius {
-				// 不在圆形背景内，保持透明
-				canvas.Set(x, y, transparent)
-				continue
-			}
+			for sy := 0; sy < ss; sy++ {
+				for sx := 0; sx < ss; sx++ {
+					px := float64(x) + (float64(sx)+0.5)*step
+					py := float64(y) + (float64(sy)+0.5)*step
+					bx, by := px/sc, py/sc
 
-			// 判断1: 是否在三角形内
-			inTriangle := false
-			if yf >= Ty-H && yf <= Ty {
-				maxWidth := R * 2.0
-				currentWidth := maxWidth * (yf - (Ty - H)) / H
-				if xf >= Cx-currentWidth/2.0 && xf <= Cx+currentWidth/2.0 {
-					inTriangle = true
+					// Circle coverage (smooth).
+					d := math.Hypot(px-cx, py-cy)
+					var disk float64
+					switch {
+					case d <= cr-aa:
+						disk = 1
+					case d < cr+aa:
+						t := (d - (cr - aa)) / (2 * aa)
+						disk = 1 - t*t*(3-2*t)
+					}
+
+					// L membership: union of both bars; letter = fill minus hairline seams (both variants).
+					inShape := inRR(bx, by, vx0, vy0, vx1, vy1, rr) ||
+						inRR(bx, by, hx0, hy0, hx1, hy1, rr)
+					inLetter := inShape && !inSeam(bx, by)
+
+					if light {
+						if disk <= 0 {
+							continue
+						}
+						// Premultiplied RGBA: black L or white fill, masked by disk (circle edge AA).
+						if inLetter {
+							pmA += disk
+						} else {
+							pmR += disk
+							pmG += disk
+							pmB += disk
+							pmA += disk
+						}
+					} else {
+						// Black wherever the disk covers except the L body (seams count as disk ink, not hole).
+						if !inLetter {
+							sSolid += disk
+						}
+					}
 				}
 			}
 
-			// 判断2: 是否在圆形内
-			distToCircle := math.Sqrt(math.Pow(xf-Cx, 2) + math.Pow(yf-Cy, 2))
-			inCircle := distToCircle <= R
-
-			// 判断3: 是否在矩形内
-			inRectangle := xf >= lineStart && xf <= lineEnd && yf >= lineTop && yf <= lineBottom
-
-			// 如果在三角形、圆形或矩形内，保持透明；否则绘制背景色
-			if inTriangle || inCircle || inRectangle {
-				canvas.Set(x, y, transparent)
+			n := float64(ss * ss)
+			var c color.RGBA
+			if light {
+				pmR /= n
+				pmG /= n
+				pmB /= n
+				pmA /= n
+				if pmA < 1e-4 {
+					c = color.RGBA{}
+				} else {
+					inv := 1.0 / pmA
+					c = color.RGBA{
+						R: u8(255 * pmR * inv),
+						G: u8(255 * pmG * inv),
+						B: u8(255 * pmB * inv),
+						A: u8(255 * pmA),
+					}
+				}
 			} else {
-				canvas.Set(x, y, bgColor)
+				solid := sSolid / n
+				// Black disk with L-shaped hole; hairline seams remain opaque black.
+				a := u8(255 * solid)
+				c = color.RGBA{R: 0, G: 0, B: 0, A: a}
 			}
+			img.SetRGBA(x, y, c)
 		}
 	}
+	return img
+}
 
-	return canvas
+// inRR reports whether (px, py) lies inside an axis-aligned rounded rectangle.
+func inRR(px, py, x0, y0, x1, y1, r float64) bool {
+	if px < x0 || px > x1 || py < y0 || py > y1 {
+		return false
+	}
+	cr := math.Min(r, 0.5*math.Min(x1-x0, y1-y0))
+	if px < x0+cr && py < y0+cr {
+		return math.Hypot(px-(x0+cr), py-(y0+cr)) <= cr
+	}
+	if px > x1-cr && py < y0+cr {
+		return math.Hypot(px-(x1-cr), py-(y0+cr)) <= cr
+	}
+	if px < x0+cr && py > y1-cr {
+		return math.Hypot(px-(x0+cr), py-(y1-cr)) <= cr
+	}
+	if px > x1-cr && py > y1-cr {
+		return math.Hypot(px-(x1-cr), py-(y1-cr)) <= cr
+	}
+	return true
+}
+
+// u8 rounds and clamps a float64 to [0, 255].
+func u8(v float64) uint8 {
+	return uint8(math.Max(0, math.Min(255, math.Round(v))))
 }

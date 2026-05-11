@@ -5,40 +5,85 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
-  build:
+  build-linux-windows:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Generate Icon.png
-      run: |
-        python -c "from PIL import Image
-        img = Image.new('RGB', (100, 100), color = (73, 109, 137))
-        img.save('Icon.png')"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+          cache: true
 
-    - name: Install fyne-cross
-      run: |
-        go get fyne.io/tools/cmd/fyne-cross
+      - name: Generate Icon.png
+        run: go run ./tools/genicon
 
-    - name: Build for Windows, Linux, and macOS
-      run: |
-        fyne-cross windows -app-id com.lucastq.myproxy
-        fyne-cross linux -app-id com.lucastq.myproxy
-        fyne-cross mac -app-id com.lucastq.myproxy
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v2
-      with:
-        name: MyProxy Builds
-        path: builds/*
+      - name: Add Go bin to PATH
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-    - name: Release to GitHub
-      uses: softprops/action-gh-release@v1
-      with:
-        tag: release-${{ github.run_id }}
-        files: builds/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # fyne 2.5.x 用 go mod edit -json 的 CombinedOutput 解析版本；工具链首次下载的 stderr 会混入导致 JSON 报错。
+      # 用与 fyne-cross 相同的 /go 缓存挂载先拉取模块与工具链，再执行打包。
+      - name: Prime Go module and toolchain in fyne-cross cache
+        run: |
+          set -e
+          CACHE="${HOME}/.cache/fyne-cross"
+          mkdir -p "$CACHE" "${{ github.workspace }}/fyne-cross/bin" "${{ github.workspace }}/fyne-cross/dist" "${{ github.workspace }}/fyne-cross/tmp"
+          prime() {
+            docker run --rm --platform linux/amd64 \
+              -u "$(id -u):$(id -g)" \
+              -e HOME=/tmp \
+              -e CGO_ENABLED=1 \
+              -e GOTOOLCHAIN=auto \
+              -e GOCACHE=/go/go-build \
+              -e GOMODCACHE=/go/pkg/mod \
+              -v "${{ github.workspace }}:/app" \
+              -v "${CACHE}:/go" \
+              -w /app \
+              "$1" \
+              bash -ec 'export PATH="/usr/local/go/bin:$PATH" && mkdir -p /go/go-build /go/pkg/mod && go mod download'
+          }
+          prime fyneio/fyne-cross-images:windows
+          prime fyneio/fyne-cross-images:linux
+
+      # fyne-cross 镜像内 Go 可能低于 go.mod；GOTOOLCHAIN=auto 在容器内按需使用已缓存的工具链
+      - name: Build for Windows and Linux
+        run: |
+          fyne-cross windows -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
+          fyne-cross linux -app-id com.lucastq.myproxy -output proxy-gui -env GOTOOLCHAIN=auto ./cmd/gui
+
+      - name: Upload build artifacts (Windows, Linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: myproxy-linux-windows
+          path: fyne-cross/dist/**
+
+  # macOS：fyne-cross 在 macos-latest 上依赖 Docker/Podman（engine binary not found in PATH）。
+  # 恢复发布时请安装 Docker Desktop 并改用 engine docker，或在本机用 fyne package 打 .app 后单独上传。
+  release:
+    needs: [build-linux-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: myproxy-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release-${{ github.run_id }}
+          name: Release ${{ github.run_id }}
+          files: release-files/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

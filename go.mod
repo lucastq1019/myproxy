@@ -2,6 +2,8 @@ module myproxy.com/p
 
 go 1.25
 
+toolchain go1.25.0
+
 require (
 	fyne.io/fyne/v2 v2.7.1
 	github.com/fsnotify/fsnotify v1.9.0

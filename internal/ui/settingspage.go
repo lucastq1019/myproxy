@@ -365,6 +365,22 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 	})
 	resetBtn.Importance = widget.LowImportance
 
+	// 混合入站监听范围：默认仅 127.0.0.1；开启后监听 0.0.0.0 供 WSL2 等通过 Windows 主机 IP 连接（本机系统/终端/Git 仍写 127.0.0.1）。
+	listenAllCheck := widget.NewCheck("允许 WSL / 局域网访问本机入站（监听 0.0.0.0）", nil)
+	if sp.appState != nil && sp.appState.ConfigService != nil {
+		listenAllCheck.SetChecked(sp.appState.ConfigService.GetMixedInboundListenAll())
+	}
+	listenAllCheck.OnChanged = func(b bool) {
+		if sp.appState != nil && sp.appState.ConfigService != nil {
+			_ = sp.appState.ConfigService.SetMixedInboundListenAll(b)
+		}
+		if sp.appState != nil && sp.appState.MainWindow != nil {
+			sp.appState.MainWindow.RestartXrayIfRunningForInboundListenChange()
+		}
+	}
+	listenAllHint := widget.NewLabel("开启后 xray 在所有网卡监听同一端口；请在 WSL 内使用 /etc/resolv.conf 中的 nameserver 作为主机 IP（或 Windows 文档中的 WSL 主机地址），端口与本地混合入站一致。不可信网络请谨慎开启。")
+	listenAllHint.Wrapping = fyne.TextWrapWord
+
 	// 终端代理配置选项（先 SetChecked 再挂 OnChanged，避免初始化时多次触发系统代理重应用）
 	terminalProxyCheck := widget.NewCheck("终端代理", nil)
 	if sp.appState != nil && sp.appState.ConfigService != nil {
@@ -408,6 +424,9 @@ func (sp *SettingsPage) buildDirectRouteContent() fyne.CanvasObject {
 
 	// 代理配置区域：包含"终端代理"标题、"不走直连"、"重置"按钮
 	proxyConfigArea := container.NewVBox(
+		listenAllCheck,
+		listenAllHint,
+		widget.NewSeparator(),
 		terminalProxyCheck,
 		container.NewVBox(
 			gitProxyCheck,
@@ -718,10 +737,13 @@ func (sp *SettingsPage) buildAccessRecordContent() fyne.CanvasObject {
 	)
 }
 
-// loadAccessRecords 从 Store 加载访问记录。
+// loadAccessRecords 从数据库刷新访问记录缓存并载入列表数据。
 func (sp *SettingsPage) loadAccessRecords() {
 	sp.accessRecordsData = nil
 	if sp.appState != nil && sp.appState.Store != nil && sp.appState.Store.AccessRecords != nil {
+		if err := sp.appState.Store.AccessRecords.Load(); err != nil && sp.appState.Logger != nil {
+			sp.appState.Logger.Error("加载访问记录失败: %v", err)
+		}
 		sp.accessRecordsData = sp.appState.Store.AccessRecords.GetAll()
 	}
 	if sp.accessRecordsData == nil {

@@ -561,18 +561,22 @@ type RoutingOptions struct {
 // CreateXrayConfig 创建完整的 xray 配置。
 // 参数：
 //   - localPort: 本地混合入站监听端口（SOCKS5 + HTTP，为 0 时使用 database.DefaultMixedInboundPort）
+//   - listenHost: 入站 bind 地址，如 database.LocalMixedInboundListenHost 或 "0.0.0.0"（空则回退为 127.0.0.1）
 //   - server: 服务器配置，用于创建出站配置
 //   - logFilePath: 日志文件路径（可选，为空则不设置）
 //   - routing: 路由选项（可选，nil 则仅使用内置规则）
-func CreateXrayConfig(localPort int, server *model.Node, logFilePath string, routing *RoutingOptions) ([]byte, error) {
+func CreateXrayConfig(localPort int, listenHost string, server *model.Node, logFilePath string, routing *RoutingOptions) ([]byte, error) {
 	if localPort == 0 {
 		localPort = database.DefaultMixedInboundPort
+	}
+	if listenHost == "" {
+		listenHost = database.LocalMixedInboundListenHost
 	}
 
 	// 创建入站配置：Xray Socks 入站同时接受 SOCKS5 与 HTTP（同一端口）
 	inbound := map[string]interface{}{
 		"tag":      "mixed-in",
-		"listen":   "127.0.0.1",
+		"listen":   listenHost,
 		"port":     localPort,
 		"protocol": "socks",
 		"settings": map[string]interface{}{

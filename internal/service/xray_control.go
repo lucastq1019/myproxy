@@ -99,8 +99,13 @@ func (xcs *XrayControlService) StartProxy(oldInstance *xray.XrayInstance, logFil
 		}
 	}
 
+	listenHost := database.LocalMixedInboundListenHost
+	if xcs.config != nil {
+		listenHost = xcs.config.GetMixedInboundXrayListenAddress()
+	}
+
 	// 创建 xray 配置（不设日志路径，由劫持 handler 落盘）
-	xrayConfigJSON, err := xray.CreateXrayConfig(proxyPort, selectedNode, "", routing)
+	xrayConfigJSON, err := xray.CreateXrayConfig(proxyPort, listenHost, selectedNode, "", routing)
 	if err != nil {
 		logMsg := fmt.Sprintf("创建xray配置失败: %v", err)
 		if xcs.logCallback != nil {
