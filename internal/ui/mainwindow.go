@@ -358,7 +358,7 @@ func NewMainWindow(appState *AppState) *MainWindow {
 	if appState != nil && appState.ConfigService != nil {
 		localPort = appState.ConfigService.GetLocalInboundPort()
 	}
-	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", localPort)
+	mw.systemProxy = systemproxy.NewSystemProxy(database.LocalMixedInboundListenHost, localPort)
 
 	return mw
 }
@@ -653,7 +653,7 @@ func (mw *MainWindow) setWrappedWindowContent(pageContent fyne.CanvasObject) {
 	if cur.Width < 200 || cur.Height < 200 {
 		cur = mw.appState.LoadWindowSize(defaultSize)
 	}
-	w.SetContent(wrapPageWithBackground(pageContent, mw.appState.App))
+	w.SetContent(mw.appState.wrapWithWindowSizePersistence(wrapPageWithBackground(pageContent, mw.appState.App)))
 	w.Resize(cur)
 	mw.appState.SaveWindowSize(cur)
 }
@@ -1001,6 +1001,65 @@ func (mw *MainWindow) stopProxy() {
 	}
 }
 
+// RestartXrayIfRunningForInboundListenChange 在「允许 WSL/局域网入站」开关变更且代理已运行时重启 xray，使 listen 地址立即生效。
+func (mw *MainWindow) RestartXrayIfRunningForInboundListenChange() {
+	if mw == nil || mw.appState == nil || mw.appState.XrayControlService == nil {
+		return
+	}
+	if mw.appState.XrayInstance == nil || !mw.appState.XrayInstance.IsRunning() {
+		return
+	}
+
+	stopRes := mw.appState.XrayControlService.StopProxy(mw.appState.XrayInstance)
+	if stopRes.Error != nil {
+		mw.logAndShowError("停止代理失败（无法套用入站监听设置）", stopRes.Error)
+		return
+	}
+	mw.appState.XrayInstance = nil
+	if mw.appState.ProxyService != nil {
+		mw.appState.ProxyService.UpdateXrayInstance(nil)
+	}
+	mw.appState.UpdateProxyStatus()
+	mw.updateMainToggleButton()
+	if mw.nodePageInstance != nil {
+		mw.nodePageInstance.Refresh()
+	}
+
+	unifiedLogPath := ""
+	if mw.appState.Logger != nil {
+		unifiedLogPath = mw.appState.Logger.GetLogFilePath()
+	}
+	startRes := mw.appState.XrayControlService.StartProxy(nil, unifiedLogPath)
+	if startRes.Error != nil {
+		mw.logAndShowError("启动代理失败（入站监听设置可能未生效）", startRes.Error)
+		mw.appState.UpdateProxyStatus()
+		mw.updateMainToggleButton()
+		return
+	}
+	mw.appState.XrayInstance = startRes.XrayInstance
+	if mw.appState.ProxyService != nil {
+		mw.appState.ProxyService.UpdateXrayInstance(startRes.XrayInstance)
+	} else {
+		mw.appState.ProxyService = service.NewProxyService(startRes.XrayInstance, mw.appState.ConfigService)
+	}
+	if mw.appState.Logger != nil && startRes.XrayInstance != nil {
+		if n := mw.appState.Store.Nodes.GetSelected(); n != nil {
+			mw.appState.Logger.InfoWithType(logging.LogTypeProxy, "已重启 xray 以套用入站监听范围（节点: %s，端口: %d）", n.Name, startRes.XrayInstance.GetPort())
+		}
+	}
+	mw.appState.UpdateProxyStatus()
+	mw.updateMainToggleButton()
+	if mw.nodePageInstance != nil {
+		mw.nodePageInstance.Refresh()
+	}
+	if mw.appState.ConfigService != nil {
+		persisted := ParseSystemProxyMode(mw.appState.ConfigService.GetSystemProxyMode())
+		if persisted == SystemProxyModeAuto && (mw.appState.ConfigService.GetTerminalProxyEnabled() || mw.appState.ConfigService.GetGitProxyEnabled()) {
+			_ = mw.applySystemProxyModeCore(SystemProxyModeAuto, false)
+		}
+	}
+}
+
 // RefreshMainToggleButton 根据当前代理运行状态刷新主开关按钮（供节点页等调用，保持状态一致）。
 func (mw *MainWindow) RefreshMainToggleButton() {
 	mw.updateMainToggleButton()
@@ -1105,9 +1164,9 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 
 	// 确保 SystemProxy 实例已创建
 	if mw.systemProxy == nil {
-		mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", proxyPort)
+		mw.systemProxy = systemproxy.NewSystemProxy(database.LocalMixedInboundListenHost, proxyPort)
 	} else {
-		mw.systemProxy.UpdateProxy("127.0.0.1", proxyPort)
+		mw.systemProxy.UpdateProxy(database.LocalMixedInboundListenHost, proxyPort)
 	}
 
 	// 系统代理 / 终端环境变量链路：注册表与 HTTP_PROXY 等均使用下方 proxyPort
@@ -1170,7 +1229,7 @@ func (mw *MainWindow) applySystemProxyModeCore(mode SystemProxyMode, saveToStore
 		}
 		err = mw.systemProxy.SetSystemProxy()
 		if err == nil {
-			logMessage = fmt.Sprintf("已自动配置系统代理: 127.0.0.1:%d", proxyPort)
+			logMessage = fmt.Sprintf("已自动配置系统代理: %s:%d", database.LocalMixedInboundListenHost, proxyPort)
 			proxyType := "socks5"
 			if mw.appState != nil && mw.appState.ConfigService != nil {
 				proxyType = mw.appState.ConfigService.GetProxyType()
@@ -1309,7 +1368,7 @@ func (mw *MainWindow) updateSystemProxyPort() {
 		}
 	}
 
-	mw.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", proxyPort)
+	mw.systemProxy = systemproxy.NewSystemProxy(database.LocalMixedInboundListenHost, proxyPort)
 }
 
 // saveSystemProxyState 保存系统代理状态到数据库

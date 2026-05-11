@@ -62,12 +62,32 @@ func resolveVariant(appState *AppState) fyne.ThemeVariant {
 	return theme.VariantDark
 }
 
+func iconVariantSuffix(variant fyne.ThemeVariant) string {
+	if variant == theme.VariantLight {
+		return "light"
+	}
+	return "dark"
+}
+
+// iconRasterVariant selects which pixmap (light vs dark look) to rasterise for window/tray/home.
+// It is the opposite of the UI theme variant so the mark stays legible on typical title bar / tray
+// contrast (light chrome → dark glyph; dark chrome → light glyph).
+func iconRasterVariant(appState *AppState) fyne.ThemeVariant {
+	v := resolveVariant(appState)
+	if v == theme.VariantLight {
+		return theme.VariantDark
+	}
+	return theme.VariantLight
+}
+
 // createAppIcon returns the 228×228 window icon (cached after first call).
 func createAppIcon(appState *AppState) fyne.Resource {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
 	if appIconCache == nil {
-		appIconCache = buildIcon(228, "app-icon-bw.png", resolveVariant(appState))
+		v := iconRasterVariant(appState)
+		name := fmt.Sprintf("app-icon-v3-%s.png", iconVariantSuffix(v))
+		appIconCache = buildIcon(228, name, v)
 	}
 	return appIconCache
 }
@@ -77,24 +97,26 @@ func createTrayIconResource(appState *AppState) fyne.Resource {
 	iconCacheMutex.Lock()
 	defer iconCacheMutex.Unlock()
 	if trayIconCache == nil {
-		trayIconCache = buildIcon(32, "tray-icon-bw.png", resolveVariant(appState))
+		v := iconRasterVariant(appState)
+		name := fmt.Sprintf("tray-icon-v3-%s.png", iconVariantSuffix(v))
+		trayIconCache = buildIcon(32, name, v)
 	}
 	return trayIconCache
 }
 
 // createHomeLogo returns the 32×32 home-page logo for the current theme.
 func createHomeLogo(appState *AppState) fyne.Resource {
-	variant := resolveVariant(appState)
+	drawV := iconRasterVariant(appState)
 	varStr := "dark"
-	if variant == theme.VariantLight {
+	if drawV == theme.VariantLight {
 		varStr = "light"
 	}
 	themeStr := "dark"
 	if appState != nil {
 		themeStr = string(appState.GetTheme())
 	}
-	name := fmt.Sprintf("home-logo-%s-draw-%s.png", themeStr, varStr)
-	return buildIcon(32, name, variant)
+	name := fmt.Sprintf("home-logo-v3-%s-draw-%s.png", themeStr, varStr)
+	return buildIcon(32, name, drawV)
 }
 
 // buildIcon loads an icon from the disk cache, or renders and saves it.
@@ -139,8 +161,9 @@ func buildIcon(size int, name string, variant fyne.ThemeVariant) fyne.Resource {
 //
 //	Anti-aliasing: 4×4 supersampling; circle edge smooth, L edges crisp.
 //	Outside circle: always alpha = 0 (transparent) for both variants.
-//	Dark:  opaque black disk, transparent L cutout and seams.
-//	Light: opaque white disk, transparent L cutout and seams.
+//	Dark:  opaque black disk, transparent L body only; hairline seams stay black (same as disk “fill”),
+//	      mirroring light where seams take the white fill — outside circle transparent.
+//	Light: white fill inside the circle, black L graphic (seams read as white like the fill); outside circle transparent.
 func renderIcon(size int, variant fyne.ThemeVariant) *image.RGBA {
 	const base = 32.0
 	const ss = 4
@@ -183,7 +206,8 @@ func renderIcon(size int, variant fyne.ThemeVariant) *image.RGBA {
 
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			var sDisk, sL float64
+			var sSolid float64
+			var pmR, pmG, pmB, pmA float64
 
 			for sy := 0; sy < ss; sy++ {
 				for sx := 0; sx < ss; sx++ {
@@ -202,31 +226,56 @@ func renderIcon(size int, variant fyne.ThemeVariant) *image.RGBA {
 						disk = 1 - t*t*(3-2*t)
 					}
 
-					// L membership: union of both bars, minus seam lines.
+					// L membership: union of both bars; letter = fill minus hairline seams (both variants).
 					inShape := inRR(bx, by, vx0, vy0, vx1, vy1, rr) ||
 						inRR(bx, by, hx0, hy0, hx1, hy1, rr)
 					inLetter := inShape && !inSeam(bx, by)
 
-					sDisk += disk
-					if inLetter {
-						sL++
+					if light {
+						if disk <= 0 {
+							continue
+						}
+						// Premultiplied RGBA: black L or white fill, masked by disk (circle edge AA).
+						if inLetter {
+							pmA += disk
+						} else {
+							pmR += disk
+							pmG += disk
+							pmB += disk
+							pmA += disk
+						}
+					} else {
+						// Black wherever the disk covers except the L body (seams count as disk ink, not hole).
+						if !inLetter {
+							sSolid += disk
+						}
 					}
 				}
 			}
 
 			n := float64(ss * ss)
-			disk := sDisk / n
-			lett := sL / n
-
-			// solid = inside circle AND inside the L shape (coloured region).
-			// L is negative space: circle minus L = filled; L itself = transparent.
-			solid := disk * (1 - lett)
-
 			var c color.RGBA
 			if light {
-				c = color.RGBA{R: 255, G: 255, B: 255, A: u8(255 * solid)}
+				pmR /= n
+				pmG /= n
+				pmB /= n
+				pmA /= n
+				if pmA < 1e-4 {
+					c = color.RGBA{}
+				} else {
+					inv := 1.0 / pmA
+					c = color.RGBA{
+						R: u8(255 * pmR * inv),
+						G: u8(255 * pmG * inv),
+						B: u8(255 * pmB * inv),
+						A: u8(255 * pmA),
+					}
+				}
 			} else {
-				c = color.RGBA{A: u8(255 * solid)}
+				solid := sSolid / n
+				// Black disk with L-shaped hole; hairline seams remain opaque black.
+				a := u8(255 * solid)
+				c = color.RGBA{R: 0, G: 0, B: 0, A: a}
 			}
 			img.SetRGBA(x, y, c)
 		}

@@ -46,7 +46,7 @@ func (ps *ProxyService) effectiveProxyPort() int {
 
 // updateSystemProxyPort 更新系统代理管理器的端口。
 func (ps *ProxyService) updateSystemProxyPort() {
-	ps.systemProxy = systemproxy.NewSystemProxy("127.0.0.1", ps.effectiveProxyPort())
+	ps.systemProxy = systemproxy.NewSystemProxy(database.LocalMixedInboundListenHost, ps.effectiveProxyPort())
 }
 
 // UpdateXrayInstance 更新 Xray 实例引用（当 Xray 实例变化时调用）。
@@ -95,7 +95,7 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 		_ = ps.systemProxy.ClearTerminalProxy()
 		err = ps.systemProxy.SetSystemProxy()
 		if err == nil {
-			logMessage = fmt.Sprintf("已自动配置系统代理: 127.0.0.1:%d", ps.effectiveProxyPort())
+			logMessage = fmt.Sprintf("已自动配置系统代理: %s:%d", database.LocalMixedInboundListenHost, ps.effectiveProxyPort())
 		} else {
 			logMessage = fmt.Sprintf("自动配置系统代理失败: %v", err)
 		}
@@ -110,7 +110,7 @@ func (ps *ProxyService) ApplySystemProxyMode(mode string) *ApplySystemProxyModeR
 		}
 		err = ps.systemProxy.SetTerminalProxy(proxyType)
 		if err == nil {
-			proxyURL := systemproxy.TerminalProxyURL("127.0.0.1", ps.effectiveProxyPort(), proxyType)
+			proxyURL := systemproxy.TerminalProxyURL(database.LocalMixedInboundListenHost, ps.effectiveProxyPort(), proxyType)
 			if proxyType == "https_tls" {
 				logMessage = fmt.Sprintf("已设置环境变量代理: %s（HTTPS 到代理；本地默认入站为明文时请选 http）", proxyURL)
 			} else {

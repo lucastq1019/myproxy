@@ -20,6 +20,10 @@ var DB *sql.DB
 // DefaultMixedInboundPort 本地混合入站（SOCKS5+HTTP）默认端口；全项目唯一来源，xray 入站与 app_config 键 autoProxyPort 默认值均据此派生。
 const DefaultMixedInboundPort = 10808
 
+// LocalMixedInboundListenHost 本地混合入站监听地址：仅绑定本机回环，避免未鉴权代理被局域网访问。
+// xray 的 listen 与写入系统/终端/Git 代理的主机名须与此一致（勿用 0.0.0.0 作为客户端连接目标）。
+const LocalMixedInboundListenHost = "127.0.0.1"
+
 // defaultAppConfigEntries 应用配置内置默认值；InitDefaultConfig 仅在键不存在时写入，不覆盖用户已有数据。
 // autoProxyPort 在 init 中写入，与 DefaultMixedInboundPort 一致。
 var defaultAppConfigEntries = map[string]string{
@@ -41,6 +45,8 @@ var defaultAppConfigEntries = map[string]string{
 	"terminalProxyEnabled":       "false",
 	"gitProxyEnabled":            "false",
 	"proxyType":                  "socks5",
+	// mixedInboundListenAll=true 时 xray 混合入站监听 0.0.0.0，便于 WSL2 等通过 Windows 主机 IP 访问；本机系统代理仍写 127.0.0.1。
+	"mixedInboundListenAll":      "false",
 	"directRoutes":             "",
 	"directRoutesUseProxy":       "false",
 	"logsCollapsed":              "true",

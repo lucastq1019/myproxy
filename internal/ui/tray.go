@@ -188,6 +188,15 @@ func (tm *TrayManager) quit() {
 		tm.appState.MainWindow.SaveLayoutConfig()
 	}
 
+	// 立即落库窗口尺寸（避免仅依赖防抖定时器未触发）
+	tm.appState.stopWindowSizeSaveTimer()
+	if tm.appState.Window != nil && tm.appState.Window.Canvas() != nil {
+		sz := tm.appState.Window.Canvas().Size()
+		if sz.Width >= 200 && sz.Height >= 200 {
+			tm.appState.SaveWindowSize(sz)
+		}
+	}
+
 	// 退出应用
 	tm.app.Quit()
 }
